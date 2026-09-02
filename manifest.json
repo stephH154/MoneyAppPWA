@@ -1,0 +1,19 @@
+{
+  "name": "小帳本",
+  "short_name": "小帳本",
+  "description": "簡單的現金流記帳工具",
+  "start_url": "./daily-ledger.html",
+  "scope": "./",
+  "id": "./daily-ledger.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6efdf",
+  "theme_color": "#f6efdf",
+  "lang": "zh-Hant",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

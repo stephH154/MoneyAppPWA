@@ -1,0 +1,1482 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>小帳本</title>
+<meta name="description" content="簡單的現金流記帳工具">
+<meta name="theme-color" content="#f6efdf">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="小帳本">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --paper:#f6efdf;
+    --card:#fbf7ec;
+    --ink:#2d2620;
+    --ink-soft:#7d715c;
+    --rule:#ddd0af;
+    --rule-strong:#c9b98e;
+    --income:#4b6b3c;
+    --income-bg:#e3ead6;
+    --expense:#a3402c;
+    --expense-bg:#f4e2d9;
+    --pending:#a97a1f;
+    --pending-bg:#f2e5c4;
+    --done-bg:#e6ddc4;
+    --accent:#8c5a3c;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    margin:0;background:var(--paper);color:var(--ink);
+    font-family:'IBM Plex Mono', ui-monospace, monospace;
+  }
+  button,input,select{font-family:inherit;}
+  button{cursor:pointer;}
+  .serif{font-family:'Fraunces',Georgia,serif;}
+
+  /* .app is the single root the whole page renders into (mobile-first: on a phone this is just
+     the card itself). At the desktop breakpoint it becomes a wider outer card that additionally
+     houses .desktop-panel as a persistent second region -- everything stays inside one root, one
+     render() call, rather than a second top-level element that needs manual syncing. */
+  /* height (not min-height): without a real bound here, .app-body's overflow-y:auto never
+     actually engages -- the whole card just grows past the viewport as transactions pile up,
+     dragging the tabbar down with it instead of staying fixed at the bottom. */
+  .app{
+    width:100%;max-width:460px;height:100dvh;background:var(--paper);
+    margin:0 auto;position:relative;
+    display:flex;
+  }
+  .app-shell{
+    flex:1;min-width:0;position:relative;
+    display:flex;flex-direction:column;overflow-x:hidden;
+  }
+  .desktop-panel{ display:none; }
+
+  /* ---------- header ---------- */
+  .app-header{padding:14px 16px 12px;border-bottom:2px solid var(--rule-strong);flex:none;position:relative;}
+  .header-add-btn{
+    display:none; font-weight:600;font-size:12px;color:#fdf6ea;background:var(--accent);
+    border:none;border-radius:999px;padding:8px 16px;
+  }
+  .nav-row{display:flex;align-items:center;justify-content:center;gap:16px;}
+  .round-btn{
+    width:32px;height:32px;border-radius:50%;border:1px solid var(--rule-strong);
+    background:var(--card);color:var(--ink);font-size:14px;flex:none;display:flex;align-items:center;justify-content:center;
+  }
+  .round-btn[disabled]{opacity:.3;}
+  .date-block{text-align:center;min-width:150px;}
+  .date-block .date-main[data-action]{cursor:pointer;}
+  .date-block .date-main{font-family:'Fraunces',serif;font-weight:700;font-size:17px;display:flex;align-items:center;justify-content:center;gap:6px;}
+  .date-block .date-sub{font-size:10.5px;color:var(--ink-soft);letter-spacing:.04em;margin-top:2px;}
+  .ring{display:inline-block;width:11px;height:11px;border-radius:50%;flex:none;}
+  .back-today{
+    display:block;margin:8px auto 0;font-size:10.5px;color:var(--accent);border:1px solid var(--accent);
+    border-radius:999px;padding:3px 12px;background:none;
+  }
+
+  /* ---------- body ---------- */
+  .app-body-wrap{flex:1;min-height:0;position:relative;}
+  .app-body{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:12px 16px 24px;}
+  /* fixed region between .app-body and the tabbar -- see renderLedgerFooter() -- so 今日收支/
+     本月結餘 stay flush against the tab switcher instead of scrolling away with the list above.
+     Extra bottom margin so the tabbar reads as clearly separate, not glued to the content above it. */
+  .ledger-footer{flex:none;padding:0 16px;}
+  .section-label{
+    font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-soft);
+    margin:14px 0 6px;
+  }
+  .section-label:first-child{margin-top:2px;}
+  .empty-note{font-size:12px;color:var(--ink-soft);text-align:center;padding:18px 0;}
+
+  .row-list{border-radius:14px;overflow:hidden;background:var(--card);border:1px solid var(--rule);}
+  .row-swipe{position:relative;overflow:hidden;}
+  .row-swipe+.row-swipe{border-top:1px solid var(--rule);}
+  .row-content{
+    display:flex;align-items:center;gap:10px;padding:12px 12px;background:var(--card);
+    position:relative;touch-action:pan-y;
+  }
+  .row-content .cat{font-size:17px;flex:none;width:24px;text-align:center;}
+  .row-content .title{flex:1;min-width:0;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .row-content .amt{font-weight:600;font-size:13.5px;font-variant-numeric:tabular-nums;flex:none;}
+  .amt.income{color:var(--income);}
+  .amt.expense{color:var(--expense);}
+
+  .row-swipe.pending .row-content{background:var(--pending-bg);}
+  .row-swipe.pending .amt{color:var(--pending);}
+  .row-swipe.overdue .row-content{background:var(--expense-bg);}
+  .row-swipe.overdue .title .flag{color:var(--expense);font-weight:600;}
+  .pending-actions{display:flex;gap:6px;padding:0 12px 10px;background:var(--pending-bg);}
+  .row-swipe.overdue .pending-actions{background:var(--expense-bg);}
+  .mini-btn{
+    flex:1;font-size:10.5px;font-weight:600;border:1px solid var(--rule-strong);border-radius:999px;
+    background:var(--paper);color:var(--ink);padding:6px 0;
+  }
+  .undo-row{
+    display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--done-bg);
+    font-size:12px;color:var(--ink-soft);
+  }
+  .undo-row button{
+    font-size:11px;font-weight:600;color:var(--accent);border:1px solid var(--accent);
+    border-radius:999px;padding:3px 10px;background:none;
+  }
+
+  .summary-strip{
+    display:flex;margin-top:14px;padding-top:12px;border-top:2px solid var(--rule-strong);font-size:11.5px;
+  }
+  .summary-strip .cell{flex:1;text-align:center;}
+  .summary-strip .lbl{display:block;color:var(--ink-soft);font-size:9px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px;}
+  .summary-strip .val{font-weight:600;font-variant-numeric:tabular-nums;font-size:13.5px;}
+
+  .month-card{background:var(--card);border:1px solid var(--rule);border-radius:16px;padding:14px 16px;margin-top:14px;}
+  .month-card .head{display:flex;justify-content:space-between;font-size:11px;color:var(--ink-soft);margin-bottom:8px;}
+  .month-card .bal{text-align:center;padding-top:8px;border-top:1px dashed var(--rule-strong);margin-top:8px;}
+  .month-card .bal .num{font-family:'Fraunces',serif;font-size:22px;font-weight:700;}
+  .month-card .streak{text-align:center;margin-top:8px;font-size:11px;color:var(--ink-soft);}
+
+  /* ---------- FAB + tab bar ---------- */
+  /* positioned against .app-body-WRAP (a non-scrolling sibling of .app-body, not .app-body itself
+     -- see the render() comment on why) so it stays fixed regardless of list scroll position. */
+  .fab{
+    position:absolute;right:18px;bottom:18px;width:54px;height:54px;border-radius:50%;
+    background:var(--accent);color:#fdf6ea;border:none;display:flex;align-items:center;justify-content:center;
+    font-size:26px;box-shadow:0 12px 22px -8px rgba(140,90,60,.55);z-index:3;
+  }
+  .tabbar{
+    flex:none;display:flex;border-top:1px solid var(--rule-strong);background:var(--card);
+    padding:8px 0 max(10px, env(safe-area-inset-bottom));position:sticky;bottom:0;
+    margin-top:10px;
+  }
+  .tabbar .tab{flex:1;text-align:center;font-size:9.5px;color:var(--ink-soft);border:none;background:none;padding:4px 0;}
+  .tabbar .tab .ic{display:block;font-size:17px;margin-bottom:2px;}
+  .tabbar .tab.active{color:var(--accent);font-weight:600;}
+  .tabbar .tab .soon{
+    display:inline-block;font-size:7.5px;background:var(--done-bg);color:var(--ink-soft);
+    border-radius:999px;padding:1px 5px;margin-left:2px;vertical-align:2px;
+  }
+
+  /* ---------- settings ---------- */
+  .settings-menu-btn{
+    display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:13px 14px;
+    background:var(--card);border:1px solid var(--rule);border-radius:14px;margin-bottom:10px;font-size:13px;color:var(--ink);
+  }
+  .settings-menu-btn .ic{font-size:16px;}
+  .settings-back{font-size:11.5px;color:var(--accent);border:none;background:none;padding:6px 0;margin-bottom:6px;}
+  .settings-title{font-family:'Fraunces',serif;font-weight:700;font-size:16px;margin:2px 0 12px;}
+  .form-field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;}
+  .form-field label{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);}
+  .form-field input,.form-field select{
+    font-size:13.5px;color:var(--ink);background:var(--paper);border:1px solid var(--rule-strong);
+    border-radius:10px;padding:8px 10px;width:100%;
+  }
+  .form-actions{display:flex;gap:8px;margin-top:6px;}
+  .btn{
+    flex:1;padding:11px 0;border-radius:12px;font-weight:600;font-size:12.5px;border:1px solid var(--rule-strong);
+    background:var(--paper);color:var(--ink);
+  }
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fdf6ea;}
+  .btn.danger{background:var(--expense-bg);border-color:var(--expense);color:var(--expense);}
+
+  .def-row{
+    display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--card);border:1px solid var(--rule);
+    border-radius:12px;margin-bottom:8px;
+  }
+  .def-row .meta{flex:1;min-width:0;}
+  .def-row .meta .t1{font-size:13px;}
+  .def-row .meta .t2{font-size:10.5px;color:var(--ink-soft);}
+  .def-row .amt{font-weight:600;font-size:12.5px;flex:none;}
+  .def-row.inactive{opacity:.45;}
+  .icon-btn{border:none;background:none;color:var(--ink-soft);font-size:14px;padding:4px 6px;}
+
+  .cat-mgmt-group{min-height:4px;}
+  .cat-mgmt-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;background:var(--paper);touch-action:pan-y;}
+  .cat-mgmt-row.dragging{opacity:.55;}
+  .cat-mgmt-row .name-input{
+    flex:1;min-width:0;font-size:13px;border:1px solid var(--rule-strong);border-radius:10px;
+    padding:8px 10px;background:var(--paper);color:var(--ink);
+  }
+  .drag-handle{flex:none;color:var(--ink-soft);font-size:16px;cursor:grab;padding:4px 2px;touch-action:none;}
+
+  /* ---------- sheets ---------- */
+  .backdrop{
+    position:absolute;inset:0;background:rgba(45,38,32,.35);display:flex;align-items:flex-end;justify-content:center;z-index:10;
+  }
+  .sheet{
+    width:100%;max-width:460px;max-height:92vh;background:var(--card);border-radius:22px 22px 0 0;
+    padding:8px 18px calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:12px;overflow-y:auto;
+  }
+  /* small focused pickers/dialogs (calendar, new-category) always float centered, on every
+     viewport, instead of bottom-anchored like the full-height 記一筆 form -- compound class so it
+     wins on specificity regardless of source order (see the earlier @media ordering lesson). */
+  .backdrop.center-modal{ align-items:center; }
+  .sheet.center-modal{ max-width:340px; border-radius:20px; margin:0 auto; box-shadow:0 20px 44px -20px rgba(45,38,32,.5); }
+  .handle{width:36px;height:4px;background:var(--rule-strong);border-radius:99px;margin:2px auto 2px;flex:none;}
+  .sheet-head{display:flex;align-items:center;justify-content:space-between;flex:none;}
+  .sheet-head h3{font-family:'Fraunces',serif;font-size:16px;margin:0;}
+  .sheet-head .x{border:none;background:none;color:var(--ink-soft);font-size:16px;}
+
+  .type-toggle{display:flex;gap:8px;}
+  .type-toggle button{
+    flex:1;padding:10px 0;border-radius:12px;border:1px solid var(--rule-strong);font-weight:600;font-size:12px;
+    color:var(--ink-soft);background:var(--paper);
+  }
+  .type-toggle button.on.expense{background:var(--expense-bg);color:var(--expense);border-color:var(--expense);}
+  .type-toggle button.on.income{background:var(--income-bg);color:var(--income);border-color:var(--income);}
+
+  .amount-display{text-align:center;padding:4px 0;}
+  .amount-display .cur{font-size:12px;color:var(--ink-soft);}
+  .amount-display .num{font-family:'Fraunces',serif;font-size:36px;font-weight:700;font-variant-numeric:tabular-nums;}
+
+  .keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;}
+  .keypad button{
+    padding:13px 0;border-radius:12px;border:1px solid var(--rule-strong);background:var(--paper);
+    font-size:16px;color:var(--ink);
+  }
+
+  .chip-row{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;}
+  .chip{
+    flex:none;font-size:11.5px;padding:7px 12px;border-radius:999px;border:1px solid var(--rule-strong);
+    background:var(--paper);color:var(--ink-soft);white-space:nowrap;
+  }
+  .chip.sel{background:var(--pending-bg);color:var(--pending);border-color:var(--pending);font-weight:600;}
+  .chip.add{color:var(--accent);border-style:dashed;}
+
+  .field-chip{
+    display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink);
+    border:1px solid var(--rule-strong);border-radius:999px;padding:7px 13px;background:var(--paper);
+  }
+  .note-input{
+    font-size:13px;border:1px solid var(--rule-strong);border-radius:10px;padding:9px 11px;
+    background:var(--paper);color:var(--ink);width:100%;
+  }
+  .save-btn{
+    margin-top:2px;background:var(--accent);color:#fdf6ea;border:none;border-radius:14px;
+    padding:13px 0;font-weight:600;font-size:13.5px;
+  }
+
+  .alert-sheet{ gap:16px; }
+  .alert-message{ font-size:13.5px; line-height:1.6; text-align:center; padding:6px 4px; }
+
+  .new-cat-row{ display:flex; gap:10px; align-items:center; }
+  .icon-pick-btn{
+    flex:none; width:52px; height:52px; border-radius:14px; font-size:23px;
+    border:1px solid var(--rule-strong); background:var(--paper); color:var(--ink);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .icon-pick-btn.open{ border-color:var(--accent); background:var(--pending-bg); }
+  .icon-pick-btn.small{ width:38px; height:38px; border-radius:10px; font-size:17px; }
+  .new-cat-row .name-input{
+    flex:1; min-width:0; font-size:14px; border:1px solid var(--rule-strong); border-radius:12px;
+    padding:0 12px; height:52px; background:var(--paper); color:var(--ink);
+  }
+  .icon-grid{
+    display:grid; grid-template-columns:repeat(6,1fr); gap:6px;
+    max-height:150px; overflow-y:auto; padding:2px;
+  }
+  .icon-grid button{
+    font-size:18px; padding:8px 0; border-radius:10px; border:1px solid var(--rule-strong);
+    background:var(--paper);
+  }
+  .icon-grid button.sel{ background:var(--pending-bg); border-color:var(--pending); }
+
+  .cal-head{display:flex;align-items:center;justify-content:space-between;}
+  .cal-head .m{font-family:'Fraunces',serif;font-weight:700;font-size:15px;}
+  .cal-head button{border:none;background:none;color:var(--ink-soft);font-size:14px;padding:2px 8px;}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;}
+  .cal-dow{font-size:10px;color:var(--ink-soft);padding:4px 0;}
+  .cal-day{font-size:13px;padding:9px 0;border-radius:10px;color:var(--ink);border:none;background:none;}
+  .cal-day.muted{color:var(--rule-strong);}
+  .cal-day.disabled{color:var(--rule-strong);cursor:default;}
+  .cal-head button[disabled]{opacity:.3;cursor:default;}
+  .cal-day.today{border:1px solid var(--accent);color:var(--accent);font-weight:600;}
+  .cal-day.selected{background:var(--accent);color:#fdf6ea;font-weight:600;}
+
+  .preview-hero{text-align:center;padding:8px 0 2px;flex:none;}
+  .preview-hero .cat{font-size:32px;}
+  .preview-hero .name{font-family:'Fraunces',serif;font-size:16px;font-weight:700;margin-top:4px;}
+  .preview-hero .amt{font-family:'Fraunces',serif;font-size:30px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px;}
+  .preview-list .pv-row{display:flex;justify-content:space-between;padding:9px 2px;font-size:12.5px;}
+  .preview-list .pv-row+.pv-row{border-top:1px solid var(--rule);}
+  .preview-list .pv-row .k{color:var(--ink-soft);}
+  .preview-actions{display:flex;gap:8px;}
+  .placeholder-tab{text-align:center;padding:60px 20px;color:var(--ink-soft);font-size:13px;}
+  .placeholder-tab .big{font-size:34px;display:block;margin-bottom:10px;}
+
+  /* ---------- desktop card breakpoint (same file/state, so mobile+desktop test side by side) ----------
+     kept last: these override earlier rules for .app/.app-shell/.backdrop/.sheet, and an @media
+     block only wins a same-specificity tie by SOURCE ORDER, not by having a condition -- it must
+     come after them. Mobile-first stays the base: this block only ADDS the wider two-region card
+     and swaps FAB<->header button; it never redefines the mobile-first rules. */
+  @media (min-width:720px){
+    body{ background:#e9dfc4; padding:36px 0; }
+    .app{
+      max-width:760px; height:min(860px, 92vh); min-height:0; overflow:hidden;
+      border-radius:26px; border:1px solid var(--rule-strong);
+      box-shadow:0 28px 56px -26px rgba(45,38,32,.4);
+    }
+    .sheet{ max-width:400px; max-height:82%; border-radius:20px; margin:0 auto; box-shadow:0 20px 44px -20px rgba(45,38,32,.5); }
+
+    /* quick actions + month summary: a persistent second region of the SAME card (not a separate
+       top-level element), so they never disappear when .app-shell swaps between 帳本/總結/設定. */
+    .desktop-panel{
+      display:flex; flex-direction:column; gap:10px; width:250px; flex:none;
+      padding:20px 16px; border-left:1px solid var(--rule-strong); overflow-y:auto;
+    }
+    .month-card.inline-month{ display:none; }
+
+    .header-add-btn{ display:inline-flex; align-items:center; position:absolute; right:16px; top:16px; }
+    .fab{ display:none; }
+
+    /* the tab switcher itself is mobile-only (see renderTabBody()/renderHeader()'s isDesktopViewport
+       checks -- desktop always shows the ledger view, 設定 comes from the floating panel instead). */
+    .tabbar{ display:none; }
+    .app-body{ padding-bottom:20px; }
+  }
+</style>
+</head>
+<body>
+<div id="app" class="app"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ================= storage ================= */
+  var KEYS = { tx:'xzb_transactions', rec:'xzb_recurring', skip:'xzb_skip', cat:'xzb_categories' };
+
+  function loadArr(key){
+    try { var v = JSON.parse(localStorage.getItem(key)); return Array.isArray(v) ? v : []; }
+    catch(e){ return []; }
+  }
+  function saveArr(key, arr){ localStorage.setItem(key, JSON.stringify(arr)); }
+
+  var DEFAULT_CATEGORIES = [
+    {id:'cat_food', name:'餐飲', icon:'🍜', type:'expense'},
+    {id:'cat_transport', name:'交通', icon:'🚌', type:'expense'},
+    {id:'cat_fun', name:'娛樂', icon:'🎬', type:'expense'},
+    {id:'cat_home', name:'居住', icon:'🏠', type:'expense'},
+    {id:'cat_med', name:'醫療', icon:'💊', type:'expense'},
+    {id:'cat_other', name:'其他', icon:'📦', type:'expense'},
+    {id:'cat_salary', name:'薪資', icon:'💰', type:'income'},
+    {id:'cat_bonus', name:'獎金', icon:'🎁', type:'income'}
+  ];
+
+  var data = {
+    transactions: loadArr(KEYS.tx),
+    recurring: loadArr(KEYS.rec),
+    skip: loadArr(KEYS.skip),
+    categories: loadArr(KEYS.cat)
+  };
+  if (data.categories.length === 0){
+    data.categories = DEFAULT_CATEGORIES.slice();
+    saveArr(KEYS.cat, data.categories);
+  } else {
+    // migration: categories saved before the income/expense split has no `type` -- default to
+    // expense (the common case) except the one built-in income category people are likely to
+    // already have, so existing installs don't lose their 薪資 into the wrong bucket silently.
+    var migrated = false;
+    data.categories.forEach(function(c){
+      if (!c.type){ c.type = (c.id === 'cat_salary' || c.id === 'cat_bonus') ? 'income' : 'expense'; migrated = true; }
+    });
+    if (migrated) saveArr(KEYS.cat, data.categories);
+  }
+
+  function persist(){
+    saveArr(KEYS.tx, data.transactions);
+    saveArr(KEYS.rec, data.recurring);
+    saveArr(KEYS.skip, data.skip);
+    saveArr(KEYS.cat, data.categories);
+  }
+
+  /* ================= date utils ================= */
+  function pad(n){ return n < 10 ? '0'+n : ''+n; }
+  function toStr(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+  function parseDate(s){ var p = s.split('-').map(Number); return new Date(p[0], p[1]-1, p[2]); }
+  function todayStr(){ return toStr(new Date()); }
+  function addDays(s, delta){ var d = parseDate(s); d.setDate(d.getDate()+delta); return toStr(d); }
+  var WEEKDAYS = ['日','一','二','三','四','五','六'];
+  function weekdayLabel(s){ return '週'+WEEKDAYS[parseDate(s).getDay()]; }
+  function shortLabel(s){ var p = s.split('-'); return p[1]+'/'+p[2]; }
+  function daysInMonth(y, m0){ return new Date(y, m0+1, 0).getDate(); }
+  function monthKey(s){ return s.slice(0,7); }
+  function uid(){ return 'id_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+
+  /* ================= recurring due-instance logic ================= */
+  function computeDueInstance(def, today){
+    var t = parseDate(today);
+    if (def.frequency === 'daily'){
+      return { dueDate: today, period: today };
+    }
+    if (def.frequency === 'weekly'){
+      var diff = (t.getDay() - def.dayOfWeek + 7) % 7;
+      var due = new Date(t); due.setDate(t.getDate() - diff);
+      var dueStr = toStr(due);
+      return { dueDate: dueStr, period: dueStr };
+    }
+    // monthly
+    var y = t.getFullYear(), m = t.getMonth();
+    var day = Math.min(def.dayOfMonth, daysInMonth(y, m));
+    var due = new Date(y, m, day);
+    if (due > t){ m -= 1; if (m < 0){ m = 11; y -= 1; } day = Math.min(def.dayOfMonth, daysInMonth(y, m)); due = new Date(y, m, day); }
+    var dueStr2 = toStr(due);
+    return { dueDate: dueStr2, period: monthKey(dueStr2) };
+  }
+
+  function isConfirmed(defId, period){
+    return data.transactions.some(function(t){ return t.recurringId === defId && t.recurringPeriod === period; });
+  }
+  function isSkipped(defId, period){
+    return data.skip.some(function(s){ return s.recurringId === defId && s.period === period; });
+  }
+
+  function getPendingList(today){
+    var out = [];
+    data.recurring.forEach(function(def){
+      if (!def.active) return;
+      var inst = computeDueInstance(def, today);
+      if (isConfirmed(def.id, inst.period) || isSkipped(def.id, inst.period)) return;
+      if (dismissedThisSession.has(def.id+'|'+inst.period)) return;
+      out.push({ def: def, dueDate: inst.dueDate, period: inst.period, overdue: inst.dueDate < today });
+    });
+    out.sort(function(a,b){ return a.dueDate < b.dueDate ? -1 : 1; });
+    return out;
+  }
+
+  var dismissedThisSession = new Set();
+
+  /* ================= category helpers ================= */
+  function catById(id){ return data.categories.find(function(c){ return c.id === id; }); }
+  function catIcon(id){ var c = catById(id); return c ? c.icon : '❔'; }
+  function catName(id){ var c = catById(id); return c ? c.name : '未分類'; }
+
+  /* ================= app state ================= */
+  var state = {
+    view: todayStr(),
+    tab: 'ledger',
+    sheet: null,
+    subSheet: null, // popup layered ON TOP of state.sheet (calendar/新增分類), parent stays mounted
+    settingsView: null,
+    recurringDraft: null
+  };
+
+  function activeCalendar(){
+    if (state.subSheet && state.subSheet.kind === 'calendar') return state.subSheet;
+    if (state.sheet && state.sheet.kind === 'calendar') return state.sheet;
+    return null;
+  }
+
+  var swipe = { pointerId:null, el:null, startX:0, startY:0, dragging:false, txId:null };
+  var pendingRemovals = {}; // txId -> timeoutId
+
+  /* ================= computed ================= */
+  function txForDate(dateStr){
+    return data.transactions.filter(function(t){ return t.date === dateStr; })
+      .sort(function(a,b){ return a.createdAt < b.createdAt ? -1 : 1; });
+  }
+  function dayTotals(list){
+    var inc=0, exp=0;
+    list.forEach(function(t){ if (t.type==='income') inc+=t.amount; else exp+=t.amount; });
+    return { inc:inc, exp:exp, net:inc-exp };
+  }
+  function monthTotals(dateStr){
+    var mk = monthKey(dateStr);
+    var inc=0, exp=0;
+    data.transactions.forEach(function(t){ if (monthKey(t.date)!==mk) return; if (t.type==='income') inc+=t.amount; else exp+=t.amount; });
+    return { inc:inc, exp:exp, net:inc-exp };
+  }
+  function streakDays(){
+    var hasEntry = {};
+    data.transactions.forEach(function(t){ hasEntry[t.date] = true; });
+    var count = 0, cursor = todayStr();
+    if (hasEntry[cursor]) count++;
+    cursor = addDays(cursor, -1);
+    while (hasEntry[cursor]){ count++; cursor = addDays(cursor, -1); }
+    return count;
+  }
+  function fmtAmt(n){
+    var neg = n < 0; n = Math.abs(n);
+    var s = n.toLocaleString('en-US');
+    return (neg?'-':'') + s;
+  }
+
+  /* ================= render ================= */
+  var root = document.getElementById('app');
+
+  function render(){
+    // full innerHTML rebuild wipes scroll position on any state change (e.g. picking a
+    // category chip mid-scroll) -- snapshot the scroll offsets that matter and restore
+    // them after the rebuild instead of doing a more surgical (and much more complex) patch.
+    var prevBodyScroll = 0;
+    var bodyEl = root.querySelector('.app-body');
+    if (bodyEl) prevBodyScroll = bodyEl.scrollTop;
+    var prevChipScroll = null;
+    var chipEl = root.querySelector('.sheet .chip-row');
+    if (chipEl) prevChipScroll = chipEl.scrollLeft;
+
+    // .app-shell is the mobile-first "phone" unit (header/body/fab/tabbar/sheets); on mobile it's
+    // the only visible thing. .desktop-panel is a second, persistent region of the same card that
+    // only ever shows at the desktop breakpoint (see CSS) -- both come from this one render() call
+    // into this one root, so there's nothing else to keep in sync.
+    var shellHtml = '';
+    shellHtml += renderHeader();
+    // FAB must NOT be a descendant of the scrolling .app-body itself -- a position:absolute child
+    // of the element that establishes the scroll (its own containing block) scrolls right along
+    // with that content despite being "absolute" (this bit us: the FAB drifted off with the list).
+    // .app-body-wrap is a non-scrolling sibling wrapper; .app-body fills it and scrolls internally,
+    // and the FAB is positioned against the WRAPPER instead, so it stays put regardless of scroll.
+    var ledgerActive = isLedgerActive();
+    shellHtml += '<div class="app-body-wrap"><div class="app-body">' + renderTabBody() + '</div>';
+    if (ledgerActive){
+      shellHtml += '<button class="fab" data-action="openAdd">＋</button>';
+    }
+    shellHtml += '</div>';
+    if (ledgerActive){ shellHtml += renderLedgerFooter(); }
+    shellHtml += renderTabbar();
+    if (state.sheet){ shellHtml += renderSheet(); }
+    if (state.subSheet){ shellHtml += renderSubSheet(); }
+
+    var html = '<div class="app-shell">' + shellHtml + '</div>';
+    html += '<div class="desktop-panel">' + renderDesktopPanel() + '</div>';
+    root.innerHTML = html;
+
+    var newBodyEl = root.querySelector('.app-body');
+    if (newBodyEl) newBodyEl.scrollTop = prevBodyScroll;
+    if (prevChipScroll !== null){
+      var newChipEl = root.querySelector('.sheet .chip-row');
+      if (newChipEl) newChipEl.scrollLeft = prevChipScroll;
+    }
+  }
+
+  // desktop hides the tab switcher (帳本/總結/設定) entirely -- 設定 is reached via the floating
+  // panel instead, and 總結 has no content yet -- so the ledger view is the only thing that ever
+  // needs to show there. This also guards against a stale non-ledger state.tab (e.g. the window
+  // was resized up from mobile width while the 設定 tab was open) stranding the desktop view on
+  // a screen with no visible way back, since the tab buttons that would set it are now hidden.
+  function isDesktopViewport(){
+    return window.matchMedia('(min-width:720px)').matches;
+  }
+
+  function renderHeader(){
+    if (state.tab !== 'ledger' && !isDesktopViewport()){
+      var titleMap = { summary:'總結', settings:'設定' };
+      return '<div class="app-header"><div class="date-block"><div class="date-main serif">'+titleMap[state.tab]+'</div></div></div>';
+    }
+    var isToday = state.view === todayStr();
+    var list = txForDate(state.view);
+    var totals = dayTotals(list);
+    var total = totals.inc + totals.exp;
+    var pct = total > 0 ? Math.min(1, totals.inc && !totals.exp ? 1 : (list.length ? list.length/list.length : 0)) : 0;
+    var ringPct = list.length ? 1 : 0; // simple: full ring once anything logged today
+    var ringStyle = 'background:conic-gradient(var(--income) 0turn '+ringPct+'turn, var(--rule-strong) 0turn 1turn)';
+    var h = '<div class="app-header">';
+    h += '<div class="nav-row">';
+    h += '<button class="round-btn" data-action="prevDay">‹</button>';
+    h += '<div class="date-block"><div class="date-main" data-action="openDateNav" title="點選跳到指定日期">'+state.view+(isToday?' <span class="ring" style="'+ringStyle+'" title="今天已記 '+list.length+' 筆"></span>':'')+'</div>';
+    h += '<div class="date-sub">'+weekdayLabel(state.view)+(isToday?'　今天':'　回顧（可編輯）')+'</div></div>';
+    h += '<button class="round-btn" data-action="nextDay" '+(isToday?'disabled':'')+'>›</button>';
+    h += '</div>';
+    if (!isToday){ h += '<button class="back-today" data-action="goToday">回到今天</button>'; }
+    h += '<button class="header-add-btn" data-action="openAdd">＋ 記一筆</button>';
+    h += '</div>';
+    return h;
+  }
+
+  function renderTabbar(){
+    var t = state.tab;
+    var h = '<div class="tabbar">';
+    h += '<button class="tab '+(t==='ledger'?'active':'')+'" data-action="tab" data-tab="ledger"><span class="ic">📒</span>帳本</button>';
+    h += '<button class="tab '+(t==='summary'?'active':'')+'" data-action="tab" data-tab="summary"><span class="ic">📊</span>總結<span class="soon">之後</span></button>';
+    h += '<button class="tab '+(t==='settings'?'active':'')+'" data-action="tab" data-tab="settings"><span class="ic">⚙</span>設定</button>';
+    h += '</div>';
+    return h;
+  }
+
+  function isLedgerActive(){
+    return isDesktopViewport() || state.tab === 'ledger';
+  }
+
+  function renderTabBody(){
+    if (isLedgerActive()) return renderLedgerList();
+    if (state.tab === 'summary') return renderSummaryPlaceholder();
+    return renderSettings();
+  }
+
+  function renderSummaryPlaceholder(){
+    return '<div class="placeholder-tab"><span class="big">📊</span>總結功能之後推出<br>會依分類計算所選區間（月／週／季／年）的收入／支出佔比</div>';
+  }
+
+  // the scrollable part of the ledger tab -- pending 固定收支 + today's/this-day's transaction
+  // list ONLY. Kept separate from renderLedgerFooter() so the day/month totals can sit in a fixed
+  // region below .app-body instead of scrolling away with a growing transaction list.
+  function renderLedgerList(){
+    var isToday = state.view === todayStr();
+    var h = '';
+    if (isToday){
+      var pending = getPendingList(state.view);
+      if (pending.length){
+        h += '<div class="section-label">待確認・固定收支</div><div class="row-list">';
+        pending.forEach(function(p){
+          var cls = 'row-swipe pending' + (p.overdue ? ' overdue' : '');
+          h += '<div class="'+cls+'">';
+          h += '<div class="row-content">';
+          h += '<div class="cat">'+catIcon(p.def.categoryId)+'</div>';
+          h += '<div class="title">'+(p.overdue?'<span class="flag">逾期</span>　':'')+p.def.title+'</div>';
+          h += '<div class="amt '+p.def.type+'">'+(p.def.type==='expense'?'-':'+')+fmtAmt(p.def.amount)+'</div>';
+          h += '</div>';
+          h += '<div class="pending-actions">';
+          h += '<button class="mini-btn" data-action="confirmRecurring" data-def="'+p.def.id+'" data-due="'+p.dueDate+'" data-period="'+p.period+'">確認</button>';
+          h += '<button class="mini-btn" data-action="deferRecurring" data-def="'+p.def.id+'" data-period="'+p.period+'">延後</button>';
+          h += '<button class="mini-btn" data-action="skipRecurring" data-def="'+p.def.id+'" data-period="'+p.period+'">跳過</button>';
+          h += '</div></div>';
+        });
+        h += '</div>';
+      }
+    }
+
+    var list = txForDate(state.view);
+    h += '<div class="section-label">'+(isToday?'今天已記錄':'這天記錄過的帳')+'</div>';
+    if (!list.length){
+      h += '<div class="empty-note">這天還沒有任何記錄</div>';
+    } else {
+      h += '<div class="row-list">';
+      list.forEach(function(t){
+        if (pendingRemovals[t.id] !== undefined){
+          h += '<div class="row-swipe"><div class="undo-row">已刪除「'+escapeHtml(t.note||catName(t.categoryId))+'」<button data-action="undoRemove" data-id="'+t.id+'">復原</button></div></div>';
+          return;
+        }
+        h += '<div class="row-swipe" data-txid="'+t.id+'">';
+        h += '<div class="row-content" data-action="openPreview" data-id="'+t.id+'">';
+        h += '<div class="cat">'+catIcon(t.categoryId)+'</div>';
+        h += '<div class="title">'+escapeHtml(t.note || catName(t.categoryId))+'</div>';
+        h += '<div class="amt '+t.type+'">'+(t.type==='expense'?'-':'+')+fmtAmt(t.amount)+'</div>';
+        h += '</div></div>';
+      });
+      h += '</div>';
+    }
+    return h;
+  }
+
+  // fixed region between .app-body and the tabbar: today/this-day totals + 本月結餘, flush against
+  // the tab switcher instead of scrolling away with the (unbounded-length) transaction list above.
+  function renderLedgerFooter(){
+    var isToday = state.view === todayStr();
+    var list = txForDate(state.view);
+    var dTotals = dayTotals(list);
+    var h = '<div class="ledger-footer">';
+    h += '<div class="summary-strip">';
+    h += '<div class="cell"><span class="lbl">'+(isToday?'今日':'當日')+'收入</span><span class="val" style="color:var(--income)">+'+fmtAmt(dTotals.inc)+'</span></div>';
+    h += '<div class="cell"><span class="lbl">'+(isToday?'今日':'當日')+'支出</span><span class="val" style="color:var(--expense)">-'+fmtAmt(dTotals.exp)+'</span></div>';
+    h += '<div class="cell"><span class="lbl">淨額</span><span class="val">'+(dTotals.net>=0?'+':'-')+fmtAmt(Math.abs(dTotals.net))+'</span></div>';
+    h += '</div>';
+    // on desktop this duplicate is hidden (see .month-card.inline-month in the desktop media
+    // query) -- the one that stays visible there lives in .desktop-panel, see renderDesktopPanel()
+    h += renderMonthCard('inline-month');
+    h += '</div>';
+    return h;
+  }
+
+  function renderMonthCard(extraClass){
+    var mTotals = monthTotals(state.view);
+    var h = '<div class="month-card '+(extraClass||'')+'"><div class="head"><span>本月收入 +'+fmtAmt(mTotals.inc)+'</span><span>本月支出 -'+fmtAmt(mTotals.exp)+'</span></div>';
+    h += '<div class="bal"><div class="lbl" style="font-size:9px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;">本月結餘</div><div class="num">NT$ '+fmtAmt(mTotals.net)+'</div></div>';
+    var streak = streakDays();
+    if (streak > 0) h += '<div class="streak">🔥 連續記帳 '+streak+' 天</div>';
+    h += '</div>';
+    return h;
+  }
+
+  function renderDesktopPanel(){
+    var h = '';
+    h += '<button class="settings-menu-btn" data-action="openFloatPanel" data-view="recurring"><span class="ic">🔁</span>固定收支管理</button>';
+    h += '<button class="settings-menu-btn" data-action="openFloatPanel" data-view="categories"><span class="ic">🏷️</span>分類管理</button>';
+    h += '<button class="settings-menu-btn" data-action="openFloatPanel" data-view=""><span class="ic">⚙</span>更多設定</button>';
+    h += renderMonthCard('');
+    return h;
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+  }
+
+  /* ================= settings ================= */
+  function renderSettings(){
+    var v = state.settingsView;
+    if (v === 'recurring') return renderRecurringList();
+    if (v === 'recurringForm') return renderRecurringForm();
+    if (v === 'categories') return renderCategoriesList();
+    var h = '';
+    h += '<button class="settings-menu-btn" data-action="gotoSettings" data-view="recurring"><span class="ic">🔁</span>固定收支管理</button>';
+    h += '<button class="settings-menu-btn" data-action="gotoSettings" data-view="categories"><span class="ic">🏷️</span>分類管理</button>';
+    h += '<button class="settings-menu-btn" data-action="exportBackup"><span class="ic">📤</span>匯出備份</button>';
+    h += '<label class="settings-menu-btn" style="display:flex;"><span class="ic">📥</span>匯入備份<input type="file" accept="application/json" id="importFile" style="display:none;"></label>';
+    h += '<button class="settings-menu-btn" data-action="clearAll" style="color:var(--expense);"><span class="ic">🗑</span>清除所有資料</button>';
+    return h;
+  }
+
+  function renderRecurringList(){
+    var h = '<button class="settings-back" data-action="gotoSettings" data-view="">‹ 返回設定</button>';
+    h += '<div class="settings-title">固定收支管理</div>';
+    if (!data.recurring.length){ h += '<div class="empty-note">還沒有固定收支項目</div>'; }
+    data.recurring.forEach(function(def){
+      h += '<div class="def-row'+(def.active?'':' inactive')+'">';
+      h += '<div class="cat">'+catIcon(def.categoryId)+'</div>';
+      h += '<div class="meta"><div class="t1">'+escapeHtml(def.title)+'</div><div class="t2">'+freqLabel(def)+(def.active?'':'　（已停用）')+'</div></div>';
+      h += '<div class="amt '+def.type+'">'+(def.type==='expense'?'-':'+')+fmtAmt(def.amount)+'</div>';
+      h += '<button class="icon-btn" data-action="editRecurring" data-id="'+def.id+'">✎</button>';
+      h += '<button class="icon-btn" data-action="deleteRecurring" data-id="'+def.id+'">🗑</button>';
+      h += '</div>';
+    });
+    h += '<button class="btn primary" style="width:100%;margin-top:8px;" data-action="newRecurring">＋ 新增固定收支</button>';
+    return h;
+  }
+
+  function freqLabel(def){
+    if (def.frequency==='monthly') return '每月 '+def.dayOfMonth+' 號';
+    if (def.frequency==='weekly') return '每週'+WEEKDAYS[def.dayOfWeek];
+    return '每天';
+  }
+
+  function renderRecurringForm(){
+    var d = state.recurringDraft;
+    var h = '<button class="settings-back" data-action="gotoSettings" data-view="recurring">‹ 返回固定收支</button>';
+    h += '<div class="settings-title">'+(d.id?'編輯固定收支':'新增固定收支')+'</div>';
+    h += '<div class="type-toggle" style="margin-bottom:12px;">';
+    h += '<button class="'+(d.type==='expense'?'on expense':'')+'" data-action="setRecDraft" data-field="type" data-value="expense">－ 支出</button>';
+    h += '<button class="'+(d.type==='income'?'on income':'')+'" data-action="setRecDraft" data-field="type" data-value="income">＋ 收入</button>';
+    h += '</div>';
+    h += '<div class="form-field"><label>名稱</label><input type="text" data-field="title" data-action="recDraftInput" value="'+escapeHtml(d.title)+'"></div>';
+    h += '<div class="form-field"><label>金額</label><input type="number" inputmode="decimal" data-field="amount" data-action="recDraftInput" value="'+d.amount+'"></div>';
+    h += '<div class="form-field"><label>分類</label><select data-field="categoryId" data-action="recDraftInput">';
+    data.categories.forEach(function(c){ h += '<option value="'+c.id+'" '+(c.id===d.categoryId?'selected':'')+'>'+c.icon+' '+escapeHtml(c.name)+'</option>'; });
+    h += '</select></div>';
+    h += '<div class="form-field"><label>頻率</label><select data-field="frequency" data-action="recDraftInput">';
+    ['monthly','weekly','daily'].forEach(function(f){
+      var lbl = f==='monthly'?'每月':(f==='weekly'?'每週':'每天');
+      h += '<option value="'+f+'" '+(f===d.frequency?'selected':'')+'>'+lbl+'</option>';
+    });
+    h += '</select></div>';
+    if (d.frequency === 'monthly'){
+      h += '<div class="form-field"><label>每月幾號（1-28）</label><input type="number" min="1" max="28" data-field="dayOfMonth" data-action="recDraftInput" value="'+d.dayOfMonth+'"></div>';
+    }
+    if (d.frequency === 'weekly'){
+      h += '<div class="form-field"><label>星期幾</label><select data-field="dayOfWeek" data-action="recDraftInput">';
+      WEEKDAYS.forEach(function(w, i){ h += '<option value="'+i+'" '+(i===d.dayOfWeek?'selected':'')+'>週'+w+'</option>'; });
+      h += '</select></div>';
+    }
+    h += '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:12px;"><input type="checkbox" data-field="active" data-action="recDraftInput" '+(d.active?'checked':'')+'> 啟用</label>';
+    h += '<div class="form-actions"><button class="btn" data-action="gotoSettings" data-view="recurring">取消</button><button class="btn primary" data-action="saveRecurring">儲存</button></div>';
+    return h;
+  }
+
+  function renderCategoriesList(){
+    var h = '<button class="settings-back" data-action="gotoSettings" data-view="">‹ 返回設定</button>';
+    h += '<div class="settings-title">分類管理</div>';
+    h += renderCatTypeGroup('expense', '支出分類');
+    h += renderCatTypeGroup('income', '收入分類');
+    h += '<button class="btn primary" style="width:100%;margin-top:6px;" data-action="openNewCategoryFromSettings">＋ 新增分類</button>';
+    return h;
+  }
+
+  // reordering (drag) is scoped within a type -- see attachCatDrag() -- so each type renders as
+  // its own drop container; the row keeps its REAL data.categories index (data-idx) throughout,
+  // that's what drag/icon-pick/delete/rename all key off of, never the filtered display position.
+  function renderCatTypeGroup(type, label){
+    var h = '<div class="section-label">'+label+'</div><div class="cat-mgmt-group" data-cat-type="'+type+'">';
+    var any = false;
+    data.categories.forEach(function(c, idx){
+      if (c.type !== type) return;
+      any = true;
+      h += '<div class="cat-mgmt-row" data-idx="'+idx+'">';
+      h += '<span class="drag-handle">⠿</span>';
+      h += '<button class="icon-pick-btn small" data-action="openCatIconPicker" data-idx="'+idx+'">'+c.icon+'</button>';
+      h += '<input class="name-input" data-action="catName" data-idx="'+idx+'" value="'+escapeHtml(c.name)+'">';
+      h += '<button class="icon-btn" data-action="catDelete" data-idx="'+idx+'">🗑</button>';
+      h += '</div>';
+    });
+    if (!any){ h += '<div class="empty-note">還沒有'+label+'</div>'; }
+    h += '</div>';
+    return h;
+  }
+
+  /* ================= sheets ================= */
+  function renderSheet(){
+    var s = state.sheet;
+    if (s.kind === 'preview') return renderPreviewSheet(s);
+    if (s.kind === 'calendar') return renderCalendarSheet(s);
+    if (s.kind === 'settingsFloat') return renderSettingsFloatSheet(s);
+    return renderFormSheet(s);
+  }
+
+  // popup layered on top of state.sheet (see the state.subSheet comment near its declaration).
+  function renderSubSheet(){
+    var s = state.subSheet;
+    if (s.kind === 'calendar') return renderCalendarSheet(s);
+    if (s.kind === 'newCategory') return renderNewCategorySheet(s);
+    if (s.kind === 'iconPicker') return renderIconPickerSheet(s);
+    if (s.kind === 'alertDialog') return renderAlertDialogSheet(s);
+    return '';
+  }
+
+  // replaces window.alert()/window.confirm() everywhere in this app so validation/confirmation
+  // messages look like the rest of the UI instead of a bare OS dialog. onConfirm only ever runs
+  // if the user actually taps 確定 in confirm mode -- alert mode has no callback, just an ack.
+  function showAlert(message){
+    state.subSheet = { kind:'alertDialog', mode:'alert', message: message };
+    render();
+  }
+  function showConfirm(message, onConfirm){
+    state.subSheet = { kind:'alertDialog', mode:'confirm', message: message, onConfirm: onConfirm };
+    render();
+  }
+  function renderAlertDialogSheet(s){
+    var h = '<div class="backdrop center-modal" data-action="closeAlertDialog">';
+    h += '<div class="sheet center-modal alert-sheet" data-stop="1">';
+    h += '<div class="alert-message">'+escapeHtml(s.message)+'</div>';
+    if (s.mode === 'confirm'){
+      h += '<div class="form-actions"><button class="btn" data-action="closeAlertDialog">取消</button><button class="btn primary" data-action="confirmAlertDialog">確定</button></div>';
+    } else {
+      h += '<button class="btn primary" style="width:100%;" data-action="closeAlertDialog">確定</button>';
+    }
+    h += '</div></div>';
+    return h;
+  }
+
+  var ICON_CHOICES = ['🍜','🍔','🍰','☕','🚌','🚗','✈️','🚲','🎬','🎮','🎵','📚',
+    '🛍️','👕','🏠','💡','📱','💊','🏥','💰','💵','🎁','🐾','⚽','🔧','📦','❤️','🌱','🎓','🧾'];
+
+  // 分類管理: standalone icon grid for changing an EXISTING category's icon (no name field --
+  // reuses the same emoji set as the new-category dialog's inline grid).
+  function renderIconPickerSheet(s){
+    var current = data.categories[s.catIdx] ? data.categories[s.catIdx].icon : '';
+    var h = '<div class="backdrop center-modal" data-action="closeIconPicker">';
+    h += '<div class="sheet center-modal" data-stop="1" style="max-height:60vh;"><div class="handle"></div>';
+    h += '<div class="sheet-head"><h3>選擇圖示</h3><button class="x" data-action="closeIconPicker">✕</button></div>';
+    h += '<div class="icon-grid">';
+    ICON_CHOICES.forEach(function(ic){
+      h += '<button class="'+(ic===current?'sel':'')+'" data-action="pickCatIcon" data-icon="'+ic+'">'+ic+'</button>';
+    });
+    h += '</div></div></div>';
+    return h;
+  }
+
+  // small focused dialog (unlike the full-height 記一筆 form) -- always centered regardless of
+  // viewport, rather than bottom-anchored on mobile, since there's not enough content here for a
+  // sliding sheet to earn its keep. Replaces the old window.prompt() so it matches the app's look.
+  function renderNewCategorySheet(s){
+    var h = '<div class="backdrop center-modal" data-action="closeNewCategory">';
+    h += '<div class="sheet center-modal" data-stop="1" style="max-height:70vh;"><div class="handle"></div>';
+    h += '<div class="sheet-head"><h3>新增分類</h3><button class="x" data-action="closeNewCategory">✕</button></div>';
+    h += '<div class="type-toggle" style="margin-bottom:2px;">';
+    h += '<button class="'+(s.type==='expense'?'on expense':'')+'" data-action="setNewCatType" data-value="expense">－ 支出分類</button>';
+    h += '<button class="'+(s.type==='income'?'on income':'')+'" data-action="setNewCatType" data-value="income">＋ 收入分類</button>';
+    h += '</div>';
+    h += '<div class="new-cat-row">';
+    h += '<button class="icon-pick-btn'+(s.iconPickerOpen?' open':'')+'" data-action="toggleIconPicker">'+s.icon+'</button>';
+    h += '<input class="name-input" data-action="newCatSheetInput" data-field="name" placeholder="分類名稱" value="'+escapeHtml(s.name)+'">';
+    h += '</div>';
+    if (s.iconPickerOpen){
+      h += '<div class="icon-grid">';
+      ICON_CHOICES.forEach(function(ic){
+        h += '<button class="'+(ic===s.icon?'sel':'')+'" data-action="pickIcon" data-icon="'+ic+'">'+ic+'</button>';
+      });
+      h += '</div>';
+    }
+    h += '<div class="form-actions"><button class="btn" data-action="closeNewCategory">取消</button><button class="btn primary" data-action="saveNewCategory">新增</button></div>';
+    h += '</div></div>';
+    return h;
+  }
+
+  // desktop-only: the outside-the-card quick action buttons open this instead of navigating the
+  // 設定 tab, so the ledger view stays visible underneath -- reuses the exact same settingsView-
+  // driven screens (renderSettings/renderRecurringList/renderRecurringForm/renderCategoriesList).
+  function renderSettingsFloatSheet(s){
+    var h = '<div class="backdrop" data-action="closeSheetBackdrop">';
+    h += '<div class="sheet" data-stop="1"><div class="handle"></div>';
+    h += '<div class="sheet-head"><h3>設定</h3><button class="x" data-action="closeSheet">✕</button></div>';
+    h += renderSettings();
+    h += '</div></div>';
+    return h;
+  }
+
+  function renderFormSheet(s){
+    var h = '<div class="backdrop" data-action="closeSheetBackdrop">';
+    h += '<div class="sheet" data-stop="1"><div class="handle"></div>';
+    h += '<div class="sheet-head"><h3>'+(s.editingId?'編輯這筆':'記一筆')+'</h3><button class="x" data-action="closeSheet">✕</button></div>';
+    h += '<div class="type-toggle">';
+    h += '<button class="'+(s.type==='expense'?'on expense':'')+'" data-action="setSheet" data-field="type" data-value="expense">－ 支出</button>';
+    h += '<button class="'+(s.type==='income'?'on income':'')+'" data-action="setSheet" data-field="type" data-value="income">＋ 收入</button>';
+    h += '</div>';
+    h += '<div class="amount-display"><span class="cur">NT$</span> <span class="num">'+(s.amountStr||'0')+'</span></div>';
+    h += '<div class="keypad">';
+    ['1','2','3','4','5','6','7','8','9','.','0','⌫'].forEach(function(k){
+      h += '<button data-action="keypad" data-key="'+k+'">'+k+'</button>';
+    });
+    h += '</div>';
+    h += '<div class="section-label" style="margin:0;">分類</div><div class="chip-row">';
+    data.categories.filter(function(c){ return c.type === s.type; }).forEach(function(c){
+      h += '<span class="chip '+(c.id===s.categoryId?'sel':'')+'" data-action="setSheet" data-field="categoryId" data-value="'+c.id+'">'+c.icon+' '+escapeHtml(c.name)+'</span>';
+    });
+    h += '<span class="chip add" data-action="quickAddCategory">＋ 新增</span></div>';
+    h += '<div><span class="field-chip" data-action="openCalendar">📅 '+(s.date===todayStr()?'今天・':'')+s.date+'</span></div>';
+    h += '<input class="note-input" placeholder="備註（選填）" data-action="setSheetNote" value="'+escapeHtml(s.note||'')+'">';
+    if (s.editingId){
+      h += '<div class="form-actions"><button class="btn danger" data-action="deleteFromSheet">🗑 刪除</button><button class="btn primary" style="flex:2;" data-action="saveSheet">儲存</button></div>';
+    } else {
+      h += '<button class="save-btn" data-action="saveSheet">儲存</button>';
+    }
+    h += '</div></div>';
+    return h;
+  }
+
+  function renderCalendarSheet(s){
+    var cur = s.cursor; // {y, m0}
+    var selected = s.selectedDate;
+    var restrict = !!s.restrictFuture;
+    var todayS = todayStr();
+    var todayD = parseDate(todayS);
+    var atOrPastCurrentMonth = cur.y > todayD.getFullYear() || (cur.y === todayD.getFullYear() && cur.m0 >= todayD.getMonth());
+    var nextDisabled = restrict && atOrPastCurrentMonth;
+
+    var h = '<div class="backdrop center-modal" data-action="closeCalendar">';
+    h += '<div class="sheet center-modal" data-stop="1" style="max-height:70vh;"><div class="handle"></div>';
+    h += '<div class="cal-head"><button data-action="calPrevMonth">◀</button><span class="m">'+cur.y+' 年 '+(cur.m0+1)+' 月</span><button data-action="calNextMonth" '+(nextDisabled?'disabled':'')+'>▶</button></div>';
+    h += '<div class="cal-grid">';
+    WEEKDAYS.forEach(function(w){ h += '<div class="cal-dow">'+w+'</div>'; });
+    var first = new Date(cur.y, cur.m0, 1);
+    var startOffset = first.getDay();
+    var dim = daysInMonth(cur.y, cur.m0);
+    var prevDim = daysInMonth(cur.y, cur.m0===0?11:cur.m0-1);
+    for (var i=0;i<startOffset;i++){
+      h += '<div class="cal-day muted">'+(prevDim-startOffset+i+1)+'</div>';
+    }
+    for (var d=1; d<=dim; d++){
+      var dStr = cur.y+'-'+pad(cur.m0+1)+'-'+pad(d);
+      var isFuture = restrict && dStr > todayS;
+      var cls = 'cal-day' + (isFuture ? ' disabled' : '');
+      if (dStr === todayS) cls += ' today';
+      if (dStr === selected) cls += ' selected';
+      if (isFuture){
+        h += '<span class="'+cls+'">'+d+'</span>';
+      } else {
+        h += '<button class="'+cls+'" data-action="calPick" data-date="'+dStr+'">'+d+'</button>';
+      }
+    }
+    h += '</div></div></div>';
+    return h;
+  }
+
+  function renderPreviewSheet(s){
+    var t = data.transactions.find(function(x){ return x.id === s.txId; });
+    if (!t){ state.sheet = null; return ''; }
+    var h = '<div class="backdrop center-modal" data-action="closeSheetBackdrop">';
+    h += '<div class="sheet center-modal" data-stop="1"><div class="handle"></div>';
+    h += '<div class="sheet-head"><h3>帳目明細</h3><button class="x" data-action="closeSheet">✕</button></div>';
+    h += '<div class="preview-hero"><div class="cat">'+catIcon(t.categoryId)+'</div>';
+    h += '<div class="name">'+escapeHtml(t.note || catName(t.categoryId))+'</div>';
+    h += '<div class="amt '+t.type+'">'+(t.type==='expense'?'-':'+')+'NT$ '+fmtAmt(t.amount)+'</div></div>';
+    h += '<div class="preview-list">';
+    h += '<div class="pv-row"><span class="k">分類</span><span>'+catIcon(t.categoryId)+' '+escapeHtml(catName(t.categoryId))+'</span></div>';
+    h += '<div class="pv-row"><span class="k">日期</span><span>'+t.date+'　'+weekdayLabel(t.date)+'</span></div>';
+    h += '<div class="pv-row"><span class="k">備註</span><span>'+escapeHtml(t.note||'（無）')+'</span></div>';
+    h += '<div class="pv-row"><span class="k">建立時間</span><span>'+new Date(t.createdAt).toLocaleString('zh-TW',{hour12:false})+'</span></div>';
+    h += '</div>';
+    h += '<div class="preview-actions"><button class="btn danger" data-action="deleteFromPreview" data-id="'+t.id+'">🗑 刪除</button><button class="btn primary" data-action="editFromPreview" data-id="'+t.id+'">✎ 編輯</button></div>';
+    h += '</div></div>';
+    return h;
+  }
+
+  /* ================= actions ================= */
+  function openAddSheet(prefill){
+    var defaultType = (prefill && prefill.type) || 'expense';
+    var firstOfType = data.categories.filter(function(c){ return c.type === defaultType; })[0];
+    state.sheet = Object.assign({
+      kind:'form', editingId:null, type:'expense', amountStr:'0', categoryId: firstOfType ? firstOfType.id : null,
+      date: todayStr(), note:'', recurringId:null, recurringPeriod:null
+    }, prefill||{});
+    render();
+  }
+  function openEditSheet(tx){
+    state.sheet = {
+      kind:'form', editingId:tx.id, type:tx.type, amountStr:String(tx.amount),
+      categoryId:tx.categoryId, date:tx.date, note:tx.note||'', recurringId:tx.recurringId||null, recurringPeriod:tx.recurringPeriod||null
+    };
+    render();
+  }
+
+  function saveSheetEntry(){
+    var s = state.sheet;
+    var amount = parseFloat(s.amountStr);
+    if (!amount || amount <= 0){ showAlert('請輸入金額'); return; }
+    if (s.editingId){
+      var tx = data.transactions.find(function(t){ return t.id === s.editingId; });
+      tx.type = s.type; tx.amount = amount; tx.categoryId = s.categoryId; tx.date = s.date; tx.note = s.note;
+      tx.updatedAt = new Date().toISOString();
+    } else {
+      data.transactions.push({
+        id: uid(), type:s.type, amount:amount, categoryId:s.categoryId, date:s.date, note:s.note,
+        recurringId:s.recurringId||null, recurringPeriod:s.recurringPeriod||null,
+        createdAt: new Date().toISOString(), updatedAt:null
+      });
+    }
+    persist();
+    state.sheet = null;
+    render();
+  }
+
+  document.addEventListener('click', function(e){
+    var stopEl = e.target.closest('[data-stop]');
+    var backdropEl = e.target.closest('.backdrop');
+    if (backdropEl && !stopEl && e.target === backdropEl){
+      // clicked directly on backdrop (outside sheet) -> handled by data-action on backdrop itself below
+    }
+    var el = e.target.closest('[data-action]');
+    if (!el) return;
+    var action = el.getAttribute('data-action');
+    var s = state.sheet;
+
+    switch(action){
+      case 'prevDay': state.view = addDays(state.view, -1); render(); break;
+      case 'nextDay': if (state.view < todayStr()) { state.view = addDays(state.view, 1); render(); } break;
+      case 'goToday': state.view = todayStr(); render(); break;
+      case 'tab': state.tab = el.getAttribute('data-tab'); state.settingsView=null; state.sheet=null; state.subSheet=null; render(); break;
+
+      case 'openAdd': openAddSheet({date: state.view}); break;
+      case 'openPreview': state.sheet = { kind:'preview', txId: el.getAttribute('data-id') }; render(); break;
+      case 'closeSheet': state.sheet = null; render(); break;
+      case 'closeSheetBackdrop': if (e.target === el) { state.sheet = null; render(); } break;
+
+      case 'deleteFromPreview':
+        state.sheet = null;
+        beginRemove(el.getAttribute('data-id'));
+        render();
+        break;
+      case 'editFromPreview': {
+        var tx = data.transactions.find(function(t){ return t.id === el.getAttribute('data-id'); });
+        if (tx) openEditSheet(tx);
+        break;
+      }
+      case 'deleteFromSheet': {
+        var idToRemove = s.editingId;
+        state.sheet = null;
+        beginRemove(idToRemove);
+        render();
+        break;
+      }
+
+      case 'setSheet': {
+        var field = el.getAttribute('data-field');
+        s[field] = el.getAttribute('data-value');
+        if (field === 'type'){
+          // categories are typed income/expense now -- a categoryId picked under the old type
+          // would point at a category the chip row no longer shows at all, so snap to the first
+          // category of the new type (or none, if the user hasn't made any of that type yet).
+          var stillValid = data.categories.some(function(c){ return c.id === s.categoryId && c.type === s.type; });
+          if (!stillValid){
+            var firstMatch = data.categories.filter(function(c){ return c.type === s.type; })[0];
+            s.categoryId = firstMatch ? firstMatch.id : null;
+          }
+        }
+        render();
+        break;
+      }
+      case 'setSheetNote':
+        // handled by input listener below
+        break;
+      case 'saveSheet': saveSheetEntry(); break;
+
+      case 'keypad': {
+        var k = el.getAttribute('data-key');
+        var cur = s.amountStr === '0' ? '' : s.amountStr;
+        if (k === '⌫'){ cur = cur.slice(0,-1); }
+        else if (k === '.'){ if (cur.indexOf('.') === -1) cur += '.'; }
+        else { if (!(cur.indexOf('.') !== -1 && cur.split('.')[1].length >= 2)) cur += k; }
+        s.amountStr = cur === '' ? '0' : cur;
+        render();
+        break;
+      }
+
+      // 新增分類 and the record-entry date picker are launched FROM the still-open 記一筆 form,
+      // so they live in state.subSheet -- a second overlay layered on top of state.sheet, which
+      // stays mounted underneath (dimmed) instead of being replaced/hidden. The header date-tap
+      // (openDateNav) has no parent form to layer over, so that one is a plain top-level
+      // state.sheet instead. calPrevMonth/calNextMonth/calPick handle either case via activeCalendar().
+      // 新增分類 also opens from 分類管理 (no record-entry form underneath at all, sometimes not
+      // even a state.sheet) -- applyToFormCategory tells saveNewCategory whether there's a chip
+      // to auto-select back on the (possibly nonexistent) parent form.
+      case 'quickAddCategory':
+        state.subSheet = { kind:'newCategory', icon:'🏷️', name:'', type:s.type, iconPickerOpen:false, applyToFormCategory:true };
+        render();
+        break;
+      case 'openNewCategoryFromSettings':
+        state.subSheet = { kind:'newCategory', icon:'🏷️', name:'', type:'expense', iconPickerOpen:false, applyToFormCategory:false };
+        render();
+        break;
+      case 'closeNewCategory':
+        if (e.target === el){ state.subSheet = null; render(); }
+        break;
+      case 'closeAlertDialog':
+        if (e.target === el){ state.subSheet = null; render(); }
+        break;
+      case 'confirmAlertDialog': {
+        var confirmCb = state.subSheet.onConfirm;
+        state.subSheet = null;
+        if (confirmCb) confirmCb(); else render();
+        break;
+      }
+      case 'setNewCatType':
+        state.subSheet.type = el.getAttribute('data-value');
+        render();
+        break;
+      case 'toggleIconPicker':
+        state.subSheet.iconPickerOpen = !state.subSheet.iconPickerOpen;
+        render();
+        break;
+      case 'pickIcon':
+        state.subSheet.icon = el.getAttribute('data-icon');
+        state.subSheet.iconPickerOpen = false;
+        render();
+        break;
+      case 'saveNewCategory': {
+        var nm = (state.subSheet.name || '').trim();
+        if (!nm){ showAlert('請輸入分類名稱'); break; }
+        var newCat = { id: uid(), name: nm, icon: state.subSheet.icon || '🏷️', type: state.subSheet.type };
+        data.categories.push(newCat);
+        persist();
+        if (state.subSheet.applyToFormCategory && state.sheet && state.sheet.type === newCat.type){
+          state.sheet.categoryId = newCat.id;
+        }
+        state.subSheet = null;
+        render();
+        break;
+      }
+
+      // 分類管理: change an EXISTING category's icon -- same emoji grid, reused standalone
+      // (no name field, since only the icon is being changed here).
+      case 'openCatIconPicker':
+        state.subSheet = { kind:'iconPicker', catIdx: parseInt(el.getAttribute('data-idx'),10) };
+        render();
+        break;
+      case 'closeIconPicker':
+        if (e.target === el){ state.subSheet = null; render(); }
+        break;
+      case 'pickCatIcon':
+        data.categories[state.subSheet.catIdx].icon = el.getAttribute('data-icon');
+        persist();
+        state.subSheet = null;
+        render();
+        break;
+
+      case 'openCalendar': {
+        var base = parseDate(s.date);
+        state.subSheet = { kind:'calendar', cursor:{ y:base.getFullYear(), m0:base.getMonth() }, selectedDate:s.date, restrictFuture:false };
+        render();
+        break;
+      }
+      case 'openDateNav': {
+        var baseV = parseDate(state.view);
+        state.sheet = { kind:'calendar', cursor:{ y:baseV.getFullYear(), m0:baseV.getMonth() }, selectedDate:state.view, restrictFuture:true };
+        render();
+        break;
+      }
+      case 'closeCalendar':
+        if (e.target === el){
+          if (state.subSheet && state.subSheet.kind === 'calendar'){ state.subSheet = null; }
+          else { state.sheet = null; }
+          render();
+        }
+        break;
+      case 'calPrevMonth': { var c=activeCalendar().cursor; c.m0--; if(c.m0<0){c.m0=11;c.y--;} render(); break; }
+      case 'calNextMonth': { var c2=activeCalendar().cursor; c2.m0++; if(c2.m0>11){c2.m0=0;c2.y++;} render(); break; }
+      case 'calPick': {
+        var picked = el.getAttribute('data-date');
+        if (state.subSheet && state.subSheet.kind === 'calendar'){
+          state.sheet.date = picked;
+          state.subSheet = null;
+        } else {
+          state.view = picked;
+          state.sheet = null;
+        }
+        render();
+        break;
+      }
+
+      case 'confirmRecurring': {
+        var defId = el.getAttribute('data-def'), due = el.getAttribute('data-due'), period = el.getAttribute('data-period');
+        var def = data.recurring.find(function(d){ return d.id === defId; });
+        openAddSheet({ type:def.type, amountStr:String(def.amount), categoryId:def.categoryId, date:due, note:def.title, recurringId:def.id, recurringPeriod:period });
+        break;
+      }
+      case 'deferRecurring': dismissedThisSession.add(el.getAttribute('data-def')+'|'+el.getAttribute('data-period')); render(); break;
+      case 'skipRecurring':
+        data.skip.push({ recurringId: el.getAttribute('data-def'), period: el.getAttribute('data-period') });
+        persist(); render();
+        break;
+
+      case 'undoRemove': cancelRemove(el.getAttribute('data-id')); render(); break;
+
+      case 'gotoSettings': state.settingsView = el.getAttribute('data-view') || null; render(); break;
+      case 'openFloatPanel':
+        state.settingsView = el.getAttribute('data-view') || null;
+        state.sheet = { kind:'settingsFloat' };
+        render();
+        break;
+      case 'newRecurring':
+        state.recurringDraft = { id:null, title:'', type:'expense', amount:0, categoryId:data.categories[0]?data.categories[0].id:null, frequency:'monthly', dayOfMonth:1, dayOfWeek:1, active:true };
+        state.settingsView = 'recurringForm';
+        render();
+        break;
+      case 'editRecurring': {
+        var d0 = data.recurring.find(function(x){ return x.id === el.getAttribute('data-id'); });
+        state.recurringDraft = Object.assign({}, d0);
+        state.settingsView = 'recurringForm';
+        render();
+        break;
+      }
+      case 'deleteRecurring': {
+        var delRecId = el.getAttribute('data-id');
+        showConfirm('確定要刪除這個固定收支項目嗎？', function(){
+          data.recurring = data.recurring.filter(function(x){ return x.id !== delRecId; });
+          persist(); render();
+        });
+        break;
+      }
+      case 'setRecDraft':
+        state.recurringDraft[el.getAttribute('data-field')] = el.getAttribute('data-value');
+        render();
+        break;
+      case 'saveRecurring': {
+        var d = state.recurringDraft;
+        if (!d.title.trim()){ showAlert('請輸入名稱'); break; }
+        if (!d.amount || parseFloat(d.amount) <= 0){ showAlert('請輸入金額'); break; }
+        d.amount = parseFloat(d.amount) || 0;
+        d.dayOfMonth = parseInt(d.dayOfMonth,10) || 1;
+        d.dayOfWeek = parseInt(d.dayOfWeek,10) || 0;
+        if (d.id){
+          var idx = data.recurring.findIndex(function(x){ return x.id === d.id; });
+          data.recurring[idx] = d;
+        } else {
+          d.id = uid();
+          data.recurring.push(d);
+        }
+        persist();
+        state.settingsView = 'recurring';
+        render();
+        break;
+      }
+
+      case 'catDelete': {
+        var idx3 = parseInt(el.getAttribute('data-idx'),10);
+        var removed = data.categories[idx3];
+        showConfirm('刪除分類「'+removed.name+'」？已使用這個分類的帳目會改標「未分類」。', function(){
+          var removeIdx = data.categories.indexOf(removed);
+          if (removeIdx === -1) return;
+          data.categories.splice(removeIdx,1);
+          data.transactions.forEach(function(t){ if (t.categoryId === removed.id) t.categoryId = null; });
+          persist(); render();
+        });
+        break;
+      }
+      case 'exportBackup': {
+        var payload = { schemaVersion:1, exportedAt:new Date().toISOString(), transactions:data.transactions, recurring:data.recurring, skip:data.skip, categories:data.categories };
+        var blob = new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = '小帳本備份_'+todayStr()+'.json';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        break;
+      }
+      case 'clearAll':
+        showConfirm('確定要清除所有資料嗎？這個動作無法復原。', function(){
+          data.transactions = []; data.recurring = []; data.skip = []; data.categories = DEFAULT_CATEGORIES.slice();
+          persist(); state.view = todayStr(); render();
+        });
+        break;
+    }
+  }, false);
+
+  document.addEventListener('input', function(e){
+    if (e.target.matches('[data-action="setSheetNote"]')){
+      state.sheet.note = e.target.value;
+    } else if (e.target.matches('[data-action="recDraftInput"]')){
+      var field = e.target.getAttribute('data-field');
+      state.recurringDraft[field] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+      if (field === 'frequency'){
+        // the 每月幾號／星期幾 field shown below depends on this, so the form needs a re-render
+        // (unlike the other recDraftInput fields, which skip re-render to avoid disrupting typing)
+        render();
+      }
+    } else if (e.target.matches('[data-action="catName"]')){
+      data.categories[parseInt(e.target.getAttribute('data-idx'),10)].name = e.target.value;
+      persist();
+    } else if (e.target.matches('[data-action="newCatSheetInput"]')){
+      state.subSheet[e.target.getAttribute('data-field')] = e.target.value;
+    }
+  }, true);
+
+  document.addEventListener('change', function(e){
+    if (e.target.id === 'importFile'){
+      var file = e.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function(ev){
+        var obj;
+        try { obj = JSON.parse(ev.target.result); }
+        catch(err){ showAlert('備份檔案格式不對，匯入失敗'); return; }
+        showConfirm('匯入備份會覆蓋目前所有資料，確定嗎？', function(){
+          data.transactions = obj.transactions || [];
+          data.recurring = obj.recurring || [];
+          data.skip = obj.skip || [];
+          data.categories = obj.categories && obj.categories.length ? obj.categories : DEFAULT_CATEGORIES.slice();
+          persist();
+          state.view = todayStr();
+          render();
+        });
+      };
+      reader.readAsText(file);
+    }
+  });
+
+  /* ================= swipe-to-delete ================= */
+  function beginRemove(txId){
+    if (pendingRemovals[txId] !== undefined) return;
+    pendingRemovals[txId] = setTimeout(function(){
+      data.transactions = data.transactions.filter(function(t){ return t.id !== txId; });
+      delete pendingRemovals[txId];
+      persist();
+      render();
+    }, 5000);
+  }
+  function cancelRemove(txId){
+    if (pendingRemovals[txId] !== undefined){
+      clearTimeout(pendingRemovals[txId]);
+      delete pendingRemovals[txId];
+    }
+  }
+
+  document.addEventListener('pointerdown', function(e){
+    var content = e.target.closest('.row-content');
+    if (!content || !content.closest('.row-swipe[data-txid]')) return;
+    if (e.target.closest('[data-action="openPreview"]') && swipe.pointerId !== null) return;
+    if (swipe.pointerId !== null) return;
+    swipe.pointerId = e.pointerId;
+    swipe.el = content;
+    swipe.startX = e.clientX; swipe.startY = e.clientY;
+    swipe.dragging = false;
+    swipe.txId = content.closest('.row-swipe').getAttribute('data-txid');
+  });
+  document.addEventListener('pointermove', function(e){
+    if (swipe.pointerId !== e.pointerId || !swipe.el) return;
+    var dx = e.clientX - swipe.startX, dy = e.clientY - swipe.startY;
+    if (!swipe.dragging){
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      if (Math.abs(dy) > Math.abs(dx)) { swipe.pointerId = null; swipe.el = null; return; }
+      swipe.dragging = true;
+    }
+    var clamped = Math.max(0, dx);
+    swipe.el.style.transform = 'translateX('+clamped+'px)';
+    swipe.el.style.opacity = String(Math.max(0.3, 1 - clamped/220));
+  });
+  document.addEventListener('pointerup', function(e){
+    if (swipe.pointerId !== e.pointerId || !swipe.el) return;
+    var dx = e.clientX - swipe.startX;
+    if (swipe.dragging && dx > 72){
+      var txId = swipe.txId;
+      swipe.el.style.transition = 'transform .15s ease, opacity .15s ease';
+      swipe.el.style.transform = 'translateX(120%)';
+      swipe.el.style.opacity = '0';
+      setTimeout(function(){ beginRemove(txId); render(); }, 140);
+    } else if (swipe.el){
+      swipe.el.style.transition = 'transform .15s ease';
+      swipe.el.style.transform = 'translateX(0)';
+      setTimeout(function(){ if (swipe.el) swipe.el.style.transition=''; }, 160);
+    }
+    swipe.pointerId = null; swipe.el = null; swipe.dragging = false;
+  });
+  document.addEventListener('pointercancel', function(){
+    if (swipe.el){ swipe.el.style.transform=''; swipe.el.style.opacity=''; }
+    swipe.pointerId = null; swipe.el = null; swipe.dragging = false;
+  });
+
+  /* ================= 分類管理: drag-to-reorder ================= */
+  // scoped within a type group -- a row's containing .cat-mgmt-group never changes during a drag,
+  // so it can never cross from 支出 into 收入 (or vice versa) by dragging past the group boundary.
+  var catDrag = { pointerId:null, row:null, container:null, type:null };
+
+  document.addEventListener('pointerdown', function(e){
+    var handle = e.target.closest('.drag-handle');
+    if (!handle || catDrag.pointerId !== null) return;
+    var row = handle.closest('.cat-mgmt-row');
+    var container = row ? row.closest('.cat-mgmt-group') : null;
+    if (!row || !container) return;
+    catDrag.pointerId = e.pointerId;
+    catDrag.row = row;
+    catDrag.container = container;
+    catDrag.type = container.getAttribute('data-cat-type');
+    row.classList.add('dragging');
+  });
+  document.addEventListener('pointermove', function(e){
+    if (catDrag.pointerId !== e.pointerId || !catDrag.row) return;
+    e.preventDefault();
+    var rows = Array.prototype.filter.call(catDrag.container.children, function(el){
+      return el.classList.contains('cat-mgmt-row');
+    });
+    var y = e.clientY, target = null;
+    for (var i=0;i<rows.length;i++){
+      if (rows[i] === catDrag.row) continue;
+      var rect = rows[i].getBoundingClientRect();
+      if (y < rect.top + rect.height/2){ target = rows[i]; break; }
+    }
+    if (target){
+      if (target !== catDrag.row.nextSibling) catDrag.container.insertBefore(catDrag.row, target);
+    } else if (catDrag.row.nextSibling !== null){
+      catDrag.container.appendChild(catDrag.row);
+    }
+  });
+  document.addEventListener('pointerup', function(e){
+    if (catDrag.pointerId !== e.pointerId || !catDrag.row) return;
+    commitCatDragOrder();
+    catDrag.pointerId = null; catDrag.row = null; catDrag.container = null; catDrag.type = null;
+  });
+  document.addEventListener('pointercancel', function(e){
+    if (catDrag.pointerId !== e.pointerId) return;
+    if (catDrag.row) catDrag.row.classList.remove('dragging');
+    catDrag.pointerId = null; catDrag.row = null; catDrag.container = null; catDrag.type = null;
+  });
+
+  function commitCatDragOrder(){
+    var type = catDrag.type;
+    var container = catDrag.container;
+    // slot-preserving reorder (same technique daily-task-calendar's spec settled on for this exact
+    // problem): only the positions this type already occupied in data.categories get touched --
+    // the other type's rows keep their original array positions untouched, no matter how they're
+    // interleaved in storage.
+    var slots = [];
+    data.categories.forEach(function(c, i){ if (c.type === type) slots.push(i); });
+    var domRows = Array.prototype.filter.call(container.children, function(el){
+      return el.classList.contains('cat-mgmt-row');
+    });
+    var newOrder = domRows.map(function(el){ return data.categories[parseInt(el.getAttribute('data-idx'),10)]; });
+    slots.forEach(function(slotIdx, i){ data.categories[slotIdx] = newOrder[i]; });
+    persist();
+    render();
+  }
+
+  render();
+
+  // no-op (rejects silently) when opened as a plain file:// page -- service workers only
+  // register over https/localhost. Only matters once this is actually hosted somewhere.
+  if ('serviceWorker' in navigator){
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('sw.js').catch(function(){});
+    });
+  }
+})();
+</script>
+</body>
+</html>
