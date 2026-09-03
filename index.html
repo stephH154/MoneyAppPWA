@@ -155,10 +155,6 @@
   .tabbar .tab{flex:1;text-align:center;font-size:9.5px;color:var(--ink-soft);border:none;background:none;padding:4px 0;}
   .tabbar .tab .ic{display:block;font-size:17px;margin-bottom:2px;}
   .tabbar .tab.active{color:var(--accent);font-weight:600;}
-  .tabbar .tab .soon{
-    display:inline-block;font-size:7.5px;background:var(--done-bg);color:var(--ink-soft);
-    border-radius:999px;padding:1px 5px;margin-left:2px;vertical-align:2px;
-  }
 
   /* ---------- settings ---------- */
   .settings-menu-btn{
@@ -264,7 +260,7 @@
   }
 
   .alert-sheet{ gap:16px; }
-  .alert-message{ font-size:13.5px; line-height:1.6; text-align:center; padding:6px 4px; }
+  .alert-message{ font-size:13.5px; line-height:1.6; text-align:center; padding:6px 4px; white-space:pre-line; }
 
   .new-cat-row{ display:flex; gap:10px; align-items:center; }
   .icon-pick-btn{
@@ -308,8 +304,28 @@
   .preview-list .pv-row+.pv-row{border-top:1px solid var(--rule);}
   .preview-list .pv-row .k{color:var(--ink-soft);}
   .preview-actions{display:flex;gap:8px;}
-  .placeholder-tab{text-align:center;padding:60px 20px;color:var(--ink-soft);font-size:13px;}
-  .placeholder-tab .big{font-size:34px;display:block;margin-bottom:10px;}
+  /* ---------- 總結 tab ---------- */
+  .round-btn.small{width:24px;height:24px;font-size:12px;}
+  .period-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+  .period-seg{display:flex;background:var(--paper);border:1px solid var(--rule);border-radius:10px;overflow:hidden;}
+  .period-seg button{border:none;background:none;font-size:10.5px;padding:5px 9px;color:var(--ink-soft);}
+  .period-seg button.on{background:var(--accent);color:#fdf6ea;font-weight:600;}
+  .period-nav{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-soft);}
+  .period-nav b{color:var(--ink);font-weight:600;}
+  .donut-legend{display:flex;gap:16px;align-items:center;margin-bottom:14px;}
+  .donut{width:100px;height:100px;border-radius:50%;position:relative;flex:none;}
+  .donut-center{position:absolute;inset:17px;background:var(--card);border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+  .donut-center .amt{font-weight:600;font-size:12px;font-variant-numeric:tabular-nums;}
+  .donut-center .lbl{font-size:7.5px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;}
+  .legend{flex:1;display:flex;flex-direction:column;gap:5px;min-width:0;}
+  .legend-item{display:flex;align-items:center;gap:6px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none;}
+  .cat-row{display:flex;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid var(--rule);}
+  .cat-row:last-child{border-bottom:none;}
+  .cat-row .cat-ic{font-size:15px;width:18px;text-align:center;flex:none;}
+  .cat-row .cat-mid{flex:1;min-width:0;}
+  .cat-row .cat-name{font-size:12px;display:flex;justify-content:space-between;}
+  .cat-row .cat-name .pct{color:var(--ink-soft);}
 
   /* ---------- desktop card breakpoint (same file/state, so mobile+desktop test side by side) ----------
      kept last: these override earlier rules for .app/.app-shell/.backdrop/.sheet, and an @media
@@ -352,7 +368,7 @@
 
   // 每次真的要上版部署時把這個號碼加一（跟 sw.js 裡同名常數各自維護，建議一起 bump）。
   // 純粹拿來顯示在「設定」頁面最下面，方便確認目前跑的是不是最新版本。
-  var APP_VERSION = 'v1.2.1';
+  var APP_VERSION = 'v1.4.0';
 
   // 貼上你自己部署的 Apps Script /exec 網址（見 ledger-cloud-sync-apps-script.txt）。
   // 留空的話「雲端同步」設定頁會顯示「還沒設定」，其餘功能不受影響。
@@ -457,13 +473,42 @@
   function isRemoteEmpty(payload){
     return !payload || !payload.transactions;
   }
-
-  function genSyncTokenSuggestion(){
-    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
-    var out = '';
-    for (var i=0;i<20;i++) out += chars.charAt(Math.floor(Math.random()*chars.length));
-    return out;
+  // item counts only, not a full field-level diff -- just enough for the link-overwrite confirm to
+  // show "how different" the two sides are without building a merge/diff view this app never has.
+  function countSummary(obj){
+    return { tx:(obj.transactions||[]).length, rec:(obj.recurring||[]).length, cat:(obj.categories||[]).length };
   }
+
+  // union-by-id merge, used by both the 連結雲端同步 overwrite choice and the 立即同步 conflict
+  // dialog's "合併資料" option. `tsField` is the field to compare when the SAME id exists on both
+  // sides (newer wins); pass a field name that never exists (e.g. categories/recurring, which have
+  // no modification timestamp at all) to make local always win that tie -- remote-only ids still
+  // get added either way, only genuinely conflicting ids fall back to keeping the local copy.
+  function mergeById(localArr, remoteArr, tsField){
+    var map = {}, order = [];
+    localArr.forEach(function(item){ if (!(item.id in map)) order.push(item.id); map[item.id] = item; });
+    remoteArr.forEach(function(item){
+      var existing = map[item.id];
+      if (!existing){ order.push(item.id); map[item.id] = item; return; }
+      var lt = existing[tsField] || existing.createdAt || '';
+      var rt = item[tsField] || item.createdAt || '';
+      if (rt > lt) map[item.id] = item;
+    });
+    return order.map(function(id){ return map[id]; });
+  }
+  function mergeSyncPayloads(localPayload, remotePayload){
+    var mergedSkip = {};
+    (localPayload.skip||[]).concat(remotePayload.skip||[]).forEach(function(s){
+      mergedSkip[s.recurringId+'|'+s.period] = s;
+    });
+    return {
+      transactions: mergeById(localPayload.transactions||[], remotePayload.transactions||[], 'updatedAt'),
+      recurring: mergeById(localPayload.recurring||[], remotePayload.recurring||[], '__no_timestamp__'),
+      categories: mergeById(localPayload.categories||[], remotePayload.categories||[], '__no_timestamp__'),
+      skip: Object.keys(mergedSkip).map(function(k){ return mergedSkip[k]; })
+    };
+  }
+
 
   // Apps Script cold-starts are genuinely this slow -- the sibling project needed 20~25s, and
   // testing THIS deployment directly (real fetch(), not a guess) saw a first-ever call take
@@ -501,7 +546,7 @@
   }
 
   function syncErrorMessage(err){
-    if (err === 'unauthorized') return '這組密鑰不正確，請確認密鑰有沒有貼對';
+    if (err === 'unauthorized') return '密鑰錯誤，請洽系統管理員';
     if (err === 'busy') return '雲端服務目前忙碌中，稍後再試一次';
     if (err === 'network') return '連不上雲端，請檢查網路連線';
     return '同步失敗，請稍後再試一次';
@@ -553,6 +598,55 @@
   function daysInMonth(y, m0){ return new Date(y, m0+1, 0).getDate(); }
   function monthKey(s){ return s.slice(0,7); }
   function uid(){ return 'id_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+
+  /* ================= 總結 period math ================= */
+  // week is Sunday-start (t.getDay()===0), matching the convention computeDueInstance()'s
+  // weekly frequency already uses -- not ISO/Monday-start.
+  function periodStart(unit, anchor){
+    var d = parseDate(anchor);
+    if (unit === 'week'){ d.setDate(d.getDate() - d.getDay()); return toStr(d); }
+    if (unit === 'month') return toStr(new Date(d.getFullYear(), d.getMonth(), 1));
+    if (unit === 'quarter') return toStr(new Date(d.getFullYear(), Math.floor(d.getMonth()/3)*3, 1));
+    return toStr(new Date(d.getFullYear(), 0, 1));
+  }
+  function periodEnd(unit, anchor){
+    var s = parseDate(periodStart(unit, anchor));
+    if (unit === 'week'){ var d = new Date(s); d.setDate(d.getDate()+6); return toStr(d); }
+    if (unit === 'month') return toStr(new Date(s.getFullYear(), s.getMonth()+1, 0));
+    if (unit === 'quarter') return toStr(new Date(s.getFullYear(), s.getMonth()+3, 0));
+    return toStr(new Date(s.getFullYear(), 11, 31));
+  }
+  function shiftPeriod(unit, anchor, dir){
+    var d = parseDate(anchor);
+    if (unit === 'week'){ d.setDate(d.getDate() + dir*7); return toStr(d); }
+    if (unit === 'month'){ d.setMonth(d.getMonth() + dir); return toStr(d); }
+    if (unit === 'quarter'){ d.setMonth(d.getMonth() + dir*3); return toStr(d); }
+    d.setFullYear(d.getFullYear() + dir); return toStr(d);
+  }
+  function periodLabel(unit, start, end){
+    var s = parseDate(start);
+    if (unit === 'week') return shortLabel(start)+' - '+shortLabel(end);
+    if (unit === 'month') return s.getFullYear()+'/'+pad(s.getMonth()+1);
+    if (unit === 'quarter') return s.getFullYear()+' Q'+(Math.floor(s.getMonth()/3)+1);
+    return ''+s.getFullYear();
+  }
+  // rank-based, not a fixed per-category color (categories have no color field) -- a category's
+  // dot can shift between periods if its rank among that period's categories changes.
+  var CAT_PALETTE = ['#a3402c','#c9932f','#5c8a3f','#2f7a9e','#3d5c96','#6b4f96','#b0507a','#7d715c'];
+  function getSummaryBreakdown(unit, anchor, type){
+    var start = periodStart(unit, anchor), end = periodEnd(unit, anchor);
+    var totals = {}, total = 0;
+    data.transactions.forEach(function(t){
+      if (t.type !== type || t.date < start || t.date > end) return;
+      totals[t.categoryId] = (totals[t.categoryId]||0) + t.amount;
+      total += t.amount;
+    });
+    var rows = Object.keys(totals).map(function(cid){
+      return { categoryId: cid === 'null' ? null : cid, amount: totals[cid], pct: total>0 ? totals[cid]/total*100 : 0 };
+    });
+    rows.sort(function(a,b){ return b.amount - a.amount; });
+    return { start:start, end:end, total:total, rows:rows };
+  }
 
   /* ================= recurring due-instance logic ================= */
   function computeDueInstance(def, today){
@@ -611,7 +705,10 @@
     subSheet: null, // popup layered ON TOP of state.sheet (calendar/新增分類), parent stays mounted
     settingsView: null,
     recurringDraft: null,
-    syncing: false // true while 立即同步 has an in-flight request -- drives the spinner button state
+    syncing: false, // true while 立即同步 has an in-flight request -- drives the spinner button state
+    linking: false, // true while 連結雲端同步 has an in-flight request -- drives its spinner state
+    linkTokenDraft: null, // editable draft for the not-yet-linked token input; null = empty, no default
+    summary: { unit:'month', anchor: todayStr(), type:'expense' }
   };
 
   function activeCalendar(){
@@ -740,7 +837,7 @@
     var t = state.tab;
     var h = '<div class="tabbar">';
     h += '<button class="tab '+(t==='ledger'?'active':'')+'" data-action="tab" data-tab="ledger"><span class="ic">📒</span>帳本</button>';
-    h += '<button class="tab '+(t==='summary'?'active':'')+'" data-action="tab" data-tab="summary"><span class="ic">📊</span>總結<span class="soon">之後</span></button>';
+    h += '<button class="tab '+(t==='summary'?'active':'')+'" data-action="tab" data-tab="summary"><span class="ic">📊</span>總結</button>';
     h += '<button class="tab '+(t==='settings'?'active':'')+'" data-action="tab" data-tab="settings"><span class="ic">⚙</span>設定</button>';
     h += '</div>';
     return h;
@@ -752,12 +849,77 @@
 
   function renderTabBody(){
     if (isLedgerActive()) return renderLedgerList();
-    if (state.tab === 'summary') return renderSummaryPlaceholder();
+    if (state.tab === 'summary') return renderSummaryTab();
     return renderSettings();
   }
 
-  function renderSummaryPlaceholder(){
-    return '<div class="placeholder-tab"><span class="big">📊</span>總結功能之後推出<br>會依分類計算所選區間（月／週／季／年）的收入／支出佔比</div>';
+  function renderSummaryTab(){
+    var sm = state.summary;
+    var start = periodStart(sm.unit, sm.anchor), end = periodEnd(sm.unit, sm.anchor);
+    var label = periodLabel(sm.unit, start, end);
+    var atCurrent = periodStart(sm.unit, sm.anchor) >= periodStart(sm.unit, todayStr());
+
+    var incTotal = 0, expTotal = 0;
+    data.transactions.forEach(function(t){
+      if (t.date < start || t.date > end) return;
+      if (t.type === 'income') incTotal += t.amount; else expTotal += t.amount;
+    });
+
+    var bd = getSummaryBreakdown(sm.unit, sm.anchor, sm.type);
+
+    var h = '<div class="summary-tab">';
+    h += '<div class="period-row">';
+    h += '<div class="period-seg">';
+    [['week','週'],['month','月'],['quarter','季'],['year','年']].forEach(function(u){
+      h += '<button class="'+(sm.unit===u[0]?'on':'')+'" data-action="setSummaryUnit" data-unit="'+u[0]+'">'+u[1]+'</button>';
+    });
+    h += '</div>';
+    h += '<div class="period-nav"><button class="round-btn small" data-action="summaryPrev">‹</button><b>'+label+'</b><button class="round-btn small" data-action="summaryNext"'+(atCurrent?' disabled':'')+'>›</button></div>';
+    h += '</div>';
+
+    h += '<div class="summary-strip">';
+    h += '<div class="cell"><span class="lbl">收入</span><span class="val" style="color:var(--income);">'+fmtAmt(incTotal)+'</span></div>';
+    h += '<div class="cell"><span class="lbl">支出</span><span class="val" style="color:var(--expense);">'+fmtAmt(expTotal)+'</span></div>';
+    h += '<div class="cell"><span class="lbl">淨額</span><span class="val">'+fmtAmt(incTotal-expTotal)+'</span></div>';
+    h += '</div>';
+
+    h += '<div class="type-toggle" style="margin-bottom:14px;">';
+    h += '<button class="'+(sm.type==='expense'?'on expense':'')+'" data-action="setSummaryType" data-value="expense">－ 支出</button>';
+    h += '<button class="'+(sm.type==='income'?'on income':'')+'" data-action="setSummaryType" data-value="income">＋ 收入</button>';
+    h += '</div>';
+
+    if (!bd.rows.length){
+      h += '<div class="empty-note">這段期間還沒有'+(sm.type==='expense'?'支出':'收入')+'紀錄</div>';
+      h += '</div>';
+      return h;
+    }
+
+    var stops = [], acc = 0;
+    bd.rows.forEach(function(r, i){
+      var color = CAT_PALETTE[i % CAT_PALETTE.length];
+      var next = acc + r.pct;
+      stops.push(color+' '+acc.toFixed(2)+'% '+next.toFixed(2)+'%');
+      acc = next;
+    });
+    h += '<div class="donut-legend">';
+    h += '<div class="donut" style="background:conic-gradient('+stops.join(', ')+');"><div class="donut-center"><span class="amt">'+fmtAmt(bd.total)+'</span><span class="lbl">'+(sm.type==='expense'?'支出':'收入')+'</span></div></div>';
+    h += '<div class="legend">';
+    bd.rows.forEach(function(r, i){
+      h += '<div class="legend-item"><span class="dot" style="background:'+CAT_PALETTE[i % CAT_PALETTE.length]+';"></span>'+catIcon(r.categoryId)+' '+escapeHtml(catName(r.categoryId))+'</div>';
+    });
+    h += '</div></div>';
+
+    h += '<div class="row-list">';
+    bd.rows.forEach(function(r, i){
+      h += '<div class="cat-row">';
+      h += '<span class="dot" style="background:'+CAT_PALETTE[i % CAT_PALETTE.length]+';"></span>';
+      h += '<div class="cat-ic">'+catIcon(r.categoryId)+'</div>';
+      h += '<div class="cat-mid"><div class="cat-name"><span>'+escapeHtml(catName(r.categoryId))+'</span><span class="pct">'+r.pct.toFixed(1)+'%</span></div></div>';
+      h += '<div class="amt '+sm.type+'">'+fmtAmt(r.amount)+'</div>';
+      h += '</div>';
+    });
+    h += '</div></div>';
+    return h;
   }
 
   // the scrollable part of the ledger tab -- pending 固定收支 + today's/this-day's transaction
@@ -844,6 +1006,7 @@
     var h = '';
     h += '<button class="settings-menu-btn" data-action="openFloatPanel" data-view="recurring"><span class="ic">🔁</span>固定收支管理</button>';
     h += '<button class="settings-menu-btn" data-action="openFloatPanel" data-view="categories"><span class="ic">🏷️</span>分類管理</button>';
+    h += '<button class="settings-menu-btn" data-action="openFloatPanel" data-view="summary"><span class="ic">📊</span>收支統計</button>';
     h += '<button class="settings-menu-btn" data-action="openFloatPanel" data-view=""><span class="ic">⚙</span>更多設定</button>';
     h += renderMonthCard('');
     return h;
@@ -860,6 +1023,14 @@
     if (v === 'recurringForm') return renderRecurringForm();
     if (v === 'categories') return renderCategoriesList();
     if (v === 'cloudSync') return renderCloudSyncSettings();
+    if (v === 'summary'){
+      // desktop-only entry point (mobile reaches renderSummaryTab() directly via the 總結 tab,
+      // where the app header already shows the "總結" title -- no back button needed there).
+      var hs = '<button class="settings-back" data-action="gotoSettings" data-view="">‹ 返回設定</button>';
+      hs += '<div class="settings-title">收支統計</div>';
+      hs += renderSummaryTab();
+      return hs;
+    }
     var h = '';
     h += '<button class="settings-menu-btn" data-action="gotoSettings" data-view="recurring"><span class="ic">🔁</span>固定收支管理</button>';
     h += '<button class="settings-menu-btn" data-action="gotoSettings" data-view="categories"><span class="ic">🏷️</span>分類管理</button>';
@@ -880,9 +1051,9 @@
     }
     var token = getSyncToken();
     if (!token){
-      h += '<div class="empty-note" style="text-align:left;line-height:1.6;">這台裝置還沒連上雲端同步。請先設定一組專屬密鑰（還沒想好的話可以用這組隨機建議）：</div>';
-      h += '<div class="note-input" style="text-align:center;font-weight:600;user-select:all;margin-bottom:10px;">'+genSyncTokenSuggestion()+'</div>';
-      h += '<button class="btn primary" style="width:100%;" data-action="openLinkSyncToken">🔗 連結雲端同步</button>';
+      h += '<div class="empty-note" style="text-align:left;line-height:1.6;">這台裝置還沒連上雲端同步。輸入一組專屬密鑰（若無請洽系統管理員）：</div>';
+      h += '<input class="note-input" style="text-align:center;font-weight:600;width:100%;margin-bottom:10px;" placeholder="同步密鑰" data-action="linkTokenInput" value="'+escapeHtml(state.linkTokenDraft||'')+'">';
+      h += '<button class="btn primary" style="width:100%;" data-action="doLinkSync"'+(state.linking?' disabled':'')+'>'+(state.linking?'<span class="spinner"></span>連結中…':'🔗 連結雲端同步')+'</button>';
     } else {
       h += '<div class="form-field"><label>目前使用的密鑰</label><div class="note-input" style="user-select:all;">'+escapeHtml(token)+'</div></div>';
       var lastSync = syncMeta.lastSyncedRemoteTime ? new Date(syncMeta.lastSyncedRemoteTime).toLocaleString('zh-TW',{hour12:false}) : '尚未同步過';
@@ -893,24 +1064,39 @@
     return h;
   }
 
-  function renderLinkSyncSheet(s){
-    var h = '<div class="backdrop center-modal" data-action="closeLinkSync">';
-    h += '<div class="sheet center-modal alert-sheet" data-stop="1">';
-    h += '<div class="sheet-head"><h3>連結雲端同步</h3><button class="x" data-action="closeLinkSync">✕</button></div>';
-    h += '<div class="alert-message">貼上你的同步密鑰：</div>';
-    h += '<input class="note-input" data-action="linkSyncInput" placeholder="同步密鑰" value="'+escapeHtml(s.value||'')+'">';
-    h += '<div class="form-actions"><button class="btn" data-action="closeLinkSync">取消</button><button class="btn primary" data-action="submitLinkSync">連結</button></div>';
-    h += '</div></div>';
-    return h;
-  }
-
   function renderSyncConflictSheet(){
     var h = '<div class="backdrop center-modal" data-action="closeSyncConflict">';
     h += '<div class="sheet center-modal alert-sheet" data-stop="1">';
     h += '<div class="sheet-head"><h3>同步衝突</h3><button class="x" data-action="closeSyncConflict">✕</button></div>';
-    h += '<div class="alert-message">本機和雲端自從上次同步後都有新的變更，要保留哪一邊？（另一邊會被覆蓋）</div>';
+    h += '<div class="alert-message">本機和雲端自從上次同步後都有新的變更，要保留哪一邊？（也可以合併兩邊）</div>';
     h += '<button class="btn primary" style="width:100%;margin-bottom:8px;" data-action="syncKeepLocal">用本機覆蓋雲端</button>';
-    h += '<button class="btn" style="width:100%;" data-action="syncKeepRemote">用雲端覆蓋本機</button>';
+    h += '<button class="btn" style="width:100%;margin-bottom:8px;" data-action="syncKeepRemote">用雲端覆蓋本機</button>';
+    h += '<button class="btn" style="width:100%;" data-action="syncMerge">合併資料</button>';
+    h += '</div></div>';
+    return h;
+  }
+
+  function renderLinkOverwriteChoiceSheet(s){
+    var h = '<div class="backdrop center-modal" data-action="closeLinkOverwriteChoice">';
+    h += '<div class="sheet center-modal alert-sheet" data-stop="1">';
+    h += '<div class="sheet-head"><h3>雲端已有資料</h3><button class="x" data-action="closeLinkOverwriteChoice">✕</button></div>';
+    h += '<div class="alert-message">本機目前：'+s.localN.tx+' 筆帳目・'+s.localN.rec+' 筆固定收支・'+s.localN.cat+' 個分類\n雲端　　：'+s.remoteN.tx+' 筆帳目・'+s.remoteN.rec+' 筆固定收支・'+s.remoteN.cat+' 個分類</div>';
+    h += '<button class="btn primary" style="width:100%;margin-bottom:8px;" data-action="linkKeepLocal">用本機覆蓋雲端</button>';
+    h += '<button class="btn" style="width:100%;margin-bottom:8px;" data-action="linkKeepRemote">用雲端覆蓋本機</button>';
+    h += '<button class="btn" style="width:100%;margin-bottom:8px;" data-action="linkMerge">合併資料</button>';
+    h += '<button class="btn" style="width:100%;" data-action="closeLinkOverwriteChoice">取消</button>';
+    h += '</div></div>';
+    return h;
+  }
+
+  function renderClearDataChoiceSheet(){
+    var h = '<div class="backdrop center-modal" data-action="closeClearDataChoice">';
+    h += '<div class="sheet center-modal alert-sheet" data-stop="1">';
+    h += '<div class="sheet-head"><h3>清除所有資料</h3><button class="x" data-action="closeClearDataChoice">✕</button></div>';
+    h += '<div class="alert-message">這台裝置目前有連結雲端同步。清除本機資料後，如果不先取消同步，這個清除動作也會同步推上雲端，把雲端的資料一併清空。這個動作無法復原，請選擇：</div>';
+    h += '<button class="btn danger" style="width:100%;margin-bottom:8px;" data-action="clearDataUnlinkFirst">取消同步再清除（雲端資料保留）</button>';
+    h += '<button class="btn danger" style="width:100%;margin-bottom:8px;" data-action="clearDataAndSync">同步清除（雲端也會清空）</button>';
+    h += '<button class="btn" style="width:100%;" data-action="closeClearDataChoice">取消</button>';
     h += '</div></div>';
     return h;
   }
@@ -1015,8 +1201,9 @@
     if (s.kind === 'newCategory') return renderNewCategorySheet(s);
     if (s.kind === 'iconPicker') return renderIconPickerSheet(s);
     if (s.kind === 'alertDialog') return renderAlertDialogSheet(s);
-    if (s.kind === 'linkSync') return renderLinkSyncSheet(s);
     if (s.kind === 'syncConflict') return renderSyncConflictSheet();
+    if (s.kind === 'linkOverwriteChoice') return renderLinkOverwriteChoiceSheet(s);
+    if (s.kind === 'clearDataChoice') return renderClearDataChoiceSheet();
     return '';
   }
 
@@ -1242,6 +1429,24 @@
       case 'nextDay': if (state.view < todayStr()) { state.view = addDays(state.view, 1); render(); } break;
       case 'goToday': state.view = todayStr(); render(); break;
       case 'tab': state.tab = el.getAttribute('data-tab'); state.settingsView=null; state.sheet=null; state.subSheet=null; render(); break;
+
+      case 'setSummaryUnit':
+        state.summary.unit = el.getAttribute('data-unit');
+        state.summary.anchor = todayStr(); // land on the current period of the newly picked granularity
+        render();
+        break;
+      case 'summaryPrev':
+        state.summary.anchor = shiftPeriod(state.summary.unit, state.summary.anchor, -1);
+        render();
+        break;
+      case 'summaryNext':
+        state.summary.anchor = shiftPeriod(state.summary.unit, state.summary.anchor, 1);
+        render();
+        break;
+      case 'setSummaryType':
+        state.summary.type = el.getAttribute('data-value');
+        render();
+        break;
 
       case 'openAdd': openAddSheet({date: state.view}); break;
       case 'openPreview': state.sheet = { kind:'preview', txId: el.getAttribute('data-id') }; render(); break;
@@ -1490,48 +1695,66 @@
         break;
       }
       case 'clearAll':
-        showConfirm('確定要清除所有資料嗎？這個動作無法復原。', function(){
-          data.transactions = []; data.recurring = []; data.skip = []; data.categories = DEFAULT_CATEGORIES.slice();
-          persist(); state.view = todayStr(); render();
-        });
+        // if this device is linked to cloud sync, a plain persist() here would auto-push the wipe
+        // to the cloud too (persist() -> scheduleAutoSync()) -- offer a real choice instead of
+        // silently taking either side (使用者原話「如果會的話要詢問使用者...給user選 取消/
+        // 取消同步再清除/同步清除」).
+        if (getSyncToken()){
+          state.subSheet = { kind:'clearDataChoice' };
+          render();
+        } else {
+          showConfirm('確定要清除所有資料嗎？這個動作無法復原。', function(){
+            data.transactions = []; data.recurring = []; data.skip = []; data.categories = DEFAULT_CATEGORIES.slice();
+            persist(); state.view = todayStr(); render();
+          });
+        }
         break;
 
-      case 'openLinkSyncToken':
-        state.subSheet = { kind:'linkSync', value:'' };
-        render();
-        break;
-      case 'closeLinkSync':
+      case 'closeClearDataChoice':
         if (e.target === el){ state.subSheet = null; render(); }
         break;
-      case 'submitLinkSync': {
-        var linkVal = (state.subSheet.value || '').trim();
+      case 'clearDataUnlinkFirst':
+        clearSyncToken();
+        syncMeta = {};
+        state.linkTokenDraft = null;
+        saveSyncMeta();
+        data.transactions = []; data.recurring = []; data.skip = []; data.categories = DEFAULT_CATEGORIES.slice();
+        state.subSheet = null;
+        persist(); state.view = todayStr(); render();
+        break;
+      case 'clearDataAndSync':
+        data.transactions = []; data.recurring = []; data.skip = []; data.categories = DEFAULT_CATEGORIES.slice();
+        state.subSheet = null;
+        persist(); state.view = todayStr(); render();
+        break;
+
+      case 'doLinkSync': {
+        var linkVal = (state.linkTokenDraft || '').trim();
         if (!linkVal){ showAlert('請輸入密鑰'); break; }
+        state.linking = true;
+        render();
         syncFetchFull(linkVal, function(err, payload){
-          if (err){ showAlert(syncErrorMessage(err)); return; }
+          if (err){ state.linking = false; render(); showAlert(syncErrorMessage(err)); return; }
           if (isRemoteEmpty(payload)){
-            showConfirm('雲端目前還沒有資料，要把這台裝置現有的資料當作起點推上去嗎？', function(){
-              setSyncToken(linkVal);
-              syncPush(linkVal, function(err2, lastModified){
-                if (err2){ showAlert(syncErrorMessage(err2)); return; }
-                syncMeta.lastSyncedRemoteTime = lastModified;
-                syncMeta.lastLocalChangeTime = lastModified;
-                saveSyncMeta();
-                state.subSheet = null;
-                render();
-              });
+            setSyncToken(linkVal);
+            syncPush(linkVal, function(err2, lastModified){
+              state.linking = false;
+              if (err2){ render(); showAlert(syncErrorMessage(err2)); return; }
+              syncMeta.lastSyncedRemoteTime = lastModified;
+              syncMeta.lastLocalChangeTime = lastModified;
+              saveSyncMeta();
+              render();
             });
           } else {
-            showConfirm('雲端已經有資料了，連結後會用雲端資料覆蓋本機目前的資料，確定嗎？', function(){
-              setSyncToken(linkVal);
-              applySyncPayload(payload);
-              syncFetchMeta(linkVal, function(err2, lastModified){
-                syncMeta.lastSyncedRemoteTime = lastModified || Date.now();
-                syncMeta.lastLocalChangeTime = syncMeta.lastSyncedRemoteTime;
-                saveSyncMeta();
-                state.subSheet = null;
-                render();
-              });
-            });
+            // cloud already has data -- this direction actually overwrites something, unlike the
+            // empty-remote push above, so it's the one case in this flow that still asks first
+            // (使用者原話「連結還是要問要不要覆蓋，而不是直接從雲端覆蓋」), and offers a real
+            // choice, not just yes/no (使用者原話「感覺要可以選擇用本地覆蓋雲端or雲端覆蓋本地or
+            // 合併資料or取消」).
+            state.linking = false;
+            state.subSheet = { kind:'linkOverwriteChoice', linkVal:linkVal, payload:payload,
+              localN: countSummary(data), remoteN: countSummary(payload) };
+            render();
           }
         });
         break;
@@ -1606,10 +1829,73 @@
         });
         break;
       }
+      case 'syncMerge': {
+        var mergeTok = getSyncToken();
+        syncFetchFull(mergeTok, function(err, remotePayload){
+          if (err){ state.subSheet = null; render(); showAlert(syncErrorMessage(err)); return; }
+          var merged = mergeSyncPayloads(getSyncPayload(), remotePayload);
+          applySyncPayload(merged);
+          syncPush(mergeTok, function(err2, lastModified){
+            state.subSheet = null;
+            if (err2){ showAlert(syncErrorMessage(err2)); render(); return; }
+            syncMeta.lastSyncedRemoteTime = lastModified;
+            syncMeta.lastLocalChangeTime = lastModified;
+            saveSyncMeta();
+            render();
+          });
+        });
+        break;
+      }
+
+      case 'closeLinkOverwriteChoice':
+        if (e.target === el){ state.subSheet = null; render(); }
+        break;
+      case 'linkKeepLocal': {
+        var s1 = state.subSheet;
+        setSyncToken(s1.linkVal);
+        syncPush(s1.linkVal, function(err, lastModified){
+          state.subSheet = null;
+          if (err){ showAlert(syncErrorMessage(err)); render(); return; }
+          syncMeta.lastSyncedRemoteTime = lastModified;
+          syncMeta.lastLocalChangeTime = lastModified;
+          saveSyncMeta();
+          render();
+        });
+        break;
+      }
+      case 'linkKeepRemote': {
+        var s2 = state.subSheet;
+        setSyncToken(s2.linkVal);
+        applySyncPayload(s2.payload);
+        state.subSheet = null;
+        syncFetchMeta(s2.linkVal, function(err, lastModified){
+          syncMeta.lastSyncedRemoteTime = lastModified || Date.now();
+          syncMeta.lastLocalChangeTime = syncMeta.lastSyncedRemoteTime;
+          saveSyncMeta();
+          render();
+        });
+        break;
+      }
+      case 'linkMerge': {
+        var s3 = state.subSheet;
+        var merged = mergeSyncPayloads(getSyncPayload(), s3.payload);
+        setSyncToken(s3.linkVal);
+        applySyncPayload(merged);
+        state.subSheet = null;
+        syncPush(s3.linkVal, function(err, lastModified){
+          if (err){ showAlert(syncErrorMessage(err)); render(); return; }
+          syncMeta.lastSyncedRemoteTime = lastModified;
+          syncMeta.lastLocalChangeTime = lastModified;
+          saveSyncMeta();
+          render();
+        });
+        break;
+      }
       case 'unlinkSync':
         showConfirm('確定要移除這台裝置的同步設定嗎？雲端上的資料不會被刪除，之後可以再重新連結。', function(){
           clearSyncToken();
           syncMeta = {};
+          state.linkTokenDraft = null; // clear any stale typed key so the not-linked view starts empty again
           saveSyncMeta();
           render();
         });
@@ -1633,8 +1919,8 @@
       persist();
     } else if (e.target.matches('[data-action="newCatSheetInput"]')){
       state.subSheet[e.target.getAttribute('data-field')] = e.target.value;
-    } else if (e.target.matches('[data-action="linkSyncInput"]')){
-      state.subSheet.value = e.target.value;
+    } else if (e.target.matches('[data-action="linkTokenInput"]')){
+      state.linkTokenDraft = e.target.value;
     }
   }, true);
 
