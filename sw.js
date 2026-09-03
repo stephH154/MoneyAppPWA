@@ -1,13 +1,16 @@
 // 小帳本 service worker -- 只做「離線也能開起 app 外殼」這件事，資料本身一直都在
-// localStorage，跟這份快取無關。改版時記得改 CACHE_NAME（隨便加一碼版本號都行），
-// 不改的話舊裝置會一直吃到舊的快取內容，感覺不出你其實已經更新過 daily-ledger.html。
-const CACHE_NAME = 'xiaozhangben-v1';
+// localStorage，跟這份快取無關。**每次改完 daily-ledger.html 真的要上版時，把下面
+// APP_VERSION 的號碼加一**（跟 daily-ledger.html 裡同名常數的用途一樣，兩邊各自維護、
+// 不用完全同步，但建議一起bump比較好記）——不改號碼的話舊裝置會一直吃到舊的快取內容，
+// 感覺不出其實已經更新過。
+const APP_VERSION = 'v1.0.0';
+const CACHE_NAME = 'm-ledger-' + APP_VERSION;
 const APP_SHELL = [
   './daily-ledger.html',
   './manifest.json',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/apple-touch-icon.png'
+  './icon-192.png',
+  './icon-512.png',
+  './apple-touch-icon.png'
 ];
 
 self.addEventListener('install', function (e) {

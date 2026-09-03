@@ -7,8 +7,8 @@
 <meta name="description" content="簡單的現金流記帳工具">
 <meta name="theme-color" content="#f6efdf">
 <link rel="manifest" href="manifest.json">
-<link rel="icon" href="icons/favicon-32.png" sizes="32x32">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="小帳本">
@@ -346,9 +346,13 @@
 (function(){
   "use strict";
 
+  // 每次真的要上版部署時把這個號碼加一（跟 sw.js 裡同名常數各自維護，建議一起 bump）。
+  // 純粹拿來顯示在「設定」頁面最下面，方便確認目前跑的是不是最新版本。
+  var APP_VERSION = 'v1.0.0';
+
   // 貼上你自己部署的 Apps Script /exec 網址（見 ledger-cloud-sync-apps-script.txt）。
   // 留空的話「雲端同步」設定頁會顯示「還沒設定」，其餘功能不受影響。
-  var CLOUD_SYNC_URL = '';
+  var CLOUD_SYNC_URL = 'https://script.google.com/macros/s/AKfycbzTWITwyBR1WrMR5fJhmcj298j1OITGD-7ZzO-oo-4ysG9_AUQ3g85ZMYaxaWUtTtOU/exec';
 
   /* ================= storage ================= */
   var KEYS = { tx:'xzb_transactions', rec:'xzb_recurring', skip:'xzb_skip', cat:'xzb_categories' };
@@ -441,11 +445,13 @@
     return out;
   }
 
-  // Apps Script cold-starts can genuinely take several seconds -- 20~25s is the timeout this
-  // exact backend design needed in practice for the sibling project, not a guess.
+  // Apps Script cold-starts are genuinely this slow -- the sibling project needed 20~25s, and
+  // testing THIS deployment directly (real fetch(), not a guess) saw a first-ever call take
+  // ~60s before the redirect target warmed up. 22s was too tight and produced a false "連不上
+  // 雲端" on a request that would have succeeded if given more time -- 45s leaves real headroom.
   function fetchWithTimeout(url, opts){
     var controller = ('AbortController' in window) ? new AbortController() : null;
-    var timer = controller && setTimeout(function(){ controller.abort(); }, 22000);
+    var timer = controller && setTimeout(function(){ controller.abort(); }, 45000);
     var merged = Object.assign({}, opts||{});
     if (controller) merged.signal = controller.signal;
     return fetch(url, merged).then(function(r){ if (timer) clearTimeout(timer); return r; },
@@ -475,10 +481,10 @@
   }
 
   function syncErrorMessage(err){
-    if (err === 'unauthorized') return '這組密鑰還沒有在 Apps Script 登記，請先照說明文件用 addToken() 登記';
-    if (err === 'busy') return '雲端目前忙碌中，稍後再試一次';
-    if (err === 'network') return '連不上雲端，檢查一下網路連線';
-    return '同步失敗：' + err;
+    if (err === 'unauthorized') return '這組密鑰不正確，請確認密鑰有沒有貼對';
+    if (err === 'busy') return '雲端服務目前忙碌中，稍後再試一次';
+    if (err === 'network') return '連不上雲端，請檢查網路連線';
+    return '同步失敗，請稍後再試一次';
   }
 
   /* ================= date utils ================= */
@@ -805,6 +811,7 @@
     h += '<button class="settings-menu-btn" data-action="exportBackup"><span class="ic">📤</span>匯出備份</button>';
     h += '<label class="settings-menu-btn" style="display:flex;"><span class="ic">📥</span>匯入備份<input type="file" accept="application/json" id="importFile" style="display:none;"></label>';
     h += '<button class="settings-menu-btn" data-action="clearAll" style="color:var(--expense);"><span class="ic">🗑</span>清除所有資料</button>';
+    h += '<div class="empty-note" style="padding-top:6px;">小帳本 '+APP_VERSION+'</div>';
     return h;
   }
 
@@ -812,12 +819,12 @@
     var h = '<button class="settings-back" data-action="gotoSettings" data-view="">‹ 返回設定</button>';
     h += '<div class="settings-title">雲端同步</div>';
     if (!CLOUD_SYNC_URL){
-      h += '<div class="empty-note">還沒有設定 Apps Script 網址（程式碼最上面的 CLOUD_SYNC_URL）——要先部署後端才能用這個功能，見 ledger-cloud-sync-apps-script.txt。</div>';
+      h += '<div class="empty-note">雲端同步還沒有設定完成，暫時無法使用這個功能。</div>';
       return h;
     }
     var token = getSyncToken();
     if (!token){
-      h += '<div class="empty-note" style="text-align:left;line-height:1.6;">這台裝置還沒連上雲端同步。先到 Apps Script 用 <b>addToken()</b> 登記一組密鑰（還沒想好的話可以用這組隨機建議）：</div>';
+      h += '<div class="empty-note" style="text-align:left;line-height:1.6;">這台裝置還沒連上雲端同步。請先設定一組專屬密鑰（還沒想好的話可以用這組隨機建議）：</div>';
       h += '<div class="note-input" style="text-align:center;font-weight:600;user-select:all;margin-bottom:10px;">'+genSyncTokenSuggestion()+'</div>';
       h += '<button class="btn primary" style="width:100%;" data-action="openLinkSyncToken">🔗 連結雲端同步</button>';
     } else {
@@ -834,7 +841,7 @@
     var h = '<div class="backdrop center-modal" data-action="closeLinkSync">';
     h += '<div class="sheet center-modal alert-sheet" data-stop="1">';
     h += '<div class="sheet-head"><h3>連結雲端同步</h3><button class="x" data-action="closeLinkSync">✕</button></div>';
-    h += '<div class="alert-message">貼上已經在 Apps Script 登記過的密鑰：</div>';
+    h += '<div class="alert-message">貼上你的同步密鑰：</div>';
     h += '<input class="note-input" data-action="linkSyncInput" placeholder="同步密鑰" value="'+escapeHtml(s.value||'')+'">';
     h += '<div class="form-actions"><button class="btn" data-action="closeLinkSync">取消</button><button class="btn primary" data-action="submitLinkSync">連結</button></div>';
     h += '</div></div>';
