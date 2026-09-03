@@ -181,10 +181,14 @@
   }
   .btn.primary{background:var(--accent);border-color:var(--accent);color:#fdf6ea;}
   .btn.danger{background:var(--expense-bg);border-color:var(--expense);color:var(--expense);}
+  .btn[disabled]{opacity:.7;}
+  .spinner{display:inline-block;width:13px;height:13px;margin-right:6px;vertical-align:-2px;
+    border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .6s linear infinite;opacity:.85;}
+  @keyframes spin{to{transform:rotate(360deg);}}
 
   .def-row{
     display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--card);border:1px solid var(--rule);
-    border-radius:12px;margin-bottom:8px;
+    border-radius:12px;margin-bottom:8px;cursor:pointer;
   }
   .def-row .meta{flex:1;min-width:0;}
   .def-row .meta .t1{font-size:13px;}
@@ -348,7 +352,7 @@
 
   // 每次真的要上版部署時把這個號碼加一（跟 sw.js 裡同名常數各自維護，建議一起 bump）。
   // 純粹拿來顯示在「設定」頁面最下面，方便確認目前跑的是不是最新版本。
-  var APP_VERSION = 'v1.0.0';
+  var APP_VERSION = 'v1.2.1';
 
   // 貼上你自己部署的 Apps Script /exec 網址（見 ledger-cloud-sync-apps-script.txt）。
   // 留空的話「雲端同步」設定頁會顯示「還沒設定」，其餘功能不受影響。
@@ -394,6 +398,20 @@
     if (migrated) saveArr(KEYS.cat, data.categories);
   }
 
+  // migration/normalization: recurring defs saved before startDate existed have no lower bound --
+  // default to a sentinel far enough in the past that pre-existing defs keep behaving exactly like
+  // before (their overdue backlog, if any, still shows). Only newly-created defs (see 'newRecurring')
+  // get today's real date, which is what actually gates "don't backdate a pending instance to before
+  // this recurring item existed" in getPendingList().
+  function ensureRecurringStartDates(){
+    var changed = false;
+    data.recurring.forEach(function(def){
+      if (!def.startDate){ def.startDate = '2000-01-01'; changed = true; }
+    });
+    if (changed) saveArr(KEYS.rec, data.recurring);
+  }
+  ensureRecurringStartDates();
+
   /* ================= cloud sync ================= */
   // syncMeta tracks two timestamps (ms) so 立即同步/自動檢查 can tell push vs pull vs
   // conflict apart without re-fetching the whole payload every time:
@@ -417,6 +435,7 @@
     saveArr(KEYS.cat, data.categories);
     syncMeta.lastLocalChangeTime = Date.now();
     saveSyncMeta();
+    scheduleAutoSync();
   }
 
   function getSyncPayload(){
@@ -427,6 +446,7 @@
     data.recurring = obj.recurring || [];
     data.skip = obj.skip || [];
     data.categories = (obj.categories && obj.categories.length) ? obj.categories : DEFAULT_CATEGORIES.slice();
+    ensureRecurringStartDates();
     saveArr(KEYS.tx, data.transactions);
     saveArr(KEYS.rec, data.recurring);
     saveArr(KEYS.skip, data.skip);
@@ -487,6 +507,40 @@
     return '同步失敗，請稍後再試一次';
   }
 
+  // auto-push whenever the user makes a change, not just on manual 立即同步/focus. Debounced so a
+  // burst of persist() calls (e.g. typing into a category name input fires one per keystroke)
+  // collapses into a single push a moment after things settle, instead of hammering the endpoint.
+  var AUTO_SYNC_DEBOUNCE = 2500;
+  var autoSyncTimer = null;
+  function scheduleAutoSync(){
+    if (!CLOUD_SYNC_URL || !getSyncToken()) return;
+    if (autoSyncTimer) clearTimeout(autoSyncTimer);
+    autoSyncTimer = setTimeout(runAutoSync, AUTO_SYNC_DEBOUNCE);
+  }
+  function runAutoSync(){
+    autoSyncTimer = null;
+    var token = getSyncToken();
+    if (!token) return;
+    syncFetchMeta(token, function(err, remoteModified){
+      if (err) return; // silent -- next change, focus check, or manual 立即同步 will retry
+      var remoteChanged = syncMeta.lastSyncedRemoteTime !== remoteModified;
+      var localChanged = (syncMeta.lastLocalChangeTime||0) > (syncMeta.lastSyncedRemoteTime||0);
+      if (!localChanged) return; // nothing new of ours to push
+      if (remoteChanged){
+        // another device changed the cloud copy since our last sync -- don't silently overwrite it,
+        // surface the same conflict dialog 立即同步 uses (only when it's safe to interrupt).
+        if (!state.sheet && !state.subSheet){ state.subSheet = { kind:'syncConflict' }; render(); }
+        return;
+      }
+      syncPush(token, function(err2, lastModified){
+        if (err2) return;
+        syncMeta.lastSyncedRemoteTime = lastModified;
+        syncMeta.lastLocalChangeTime = lastModified;
+        saveSyncMeta();
+      });
+    });
+  }
+
   /* ================= date utils ================= */
   function pad(n){ return n < 10 ? '0'+n : ''+n; }
   function toStr(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
@@ -533,6 +587,7 @@
     data.recurring.forEach(function(def){
       if (!def.active) return;
       var inst = computeDueInstance(def, today);
+      if (def.startDate && inst.dueDate < def.startDate) return; // don't backdate a pending instance to before this recurring item existed
       if (isConfirmed(def.id, inst.period) || isSkipped(def.id, inst.period)) return;
       if (dismissedThisSession.has(def.id+'|'+inst.period)) return;
       out.push({ def: def, dueDate: inst.dueDate, period: inst.period, overdue: inst.dueDate < today });
@@ -555,7 +610,8 @@
     sheet: null,
     subSheet: null, // popup layered ON TOP of state.sheet (calendar/新增分類), parent stays mounted
     settingsView: null,
-    recurringDraft: null
+    recurringDraft: null,
+    syncing: false // true while 立即同步 has an in-flight request -- drives the spinner button state
   };
 
   function activeCalendar(){
@@ -810,7 +866,7 @@
     h += '<button class="settings-menu-btn" data-action="gotoSettings" data-view="cloudSync"><span class="ic">☁️</span>雲端同步</button>';
     h += '<button class="settings-menu-btn" data-action="exportBackup"><span class="ic">📤</span>匯出備份</button>';
     h += '<label class="settings-menu-btn" style="display:flex;"><span class="ic">📥</span>匯入備份<input type="file" accept="application/json" id="importFile" style="display:none;"></label>';
-    h += '<button class="settings-menu-btn" data-action="clearAll" style="color:var(--expense);"><span class="ic">🗑</span>清除所有資料</button>';
+    h += '<button class="settings-menu-btn" data-action="clearAll" style="color:var(--expense);"><span class="ic">🗑️</span>清除所有資料</button>';
     h += '<div class="empty-note" style="padding-top:6px;">小帳本 '+APP_VERSION+'</div>';
     return h;
   }
@@ -831,7 +887,7 @@
       h += '<div class="form-field"><label>目前使用的密鑰</label><div class="note-input" style="user-select:all;">'+escapeHtml(token)+'</div></div>';
       var lastSync = syncMeta.lastSyncedRemoteTime ? new Date(syncMeta.lastSyncedRemoteTime).toLocaleString('zh-TW',{hour12:false}) : '尚未同步過';
       h += '<div class="empty-note" style="text-align:left;padding:0 0 12px;">上次同步：'+escapeHtml(lastSync)+'</div>';
-      h += '<button class="btn primary" style="width:100%;margin-bottom:8px;" data-action="doSyncNow">☁️ 立即同步</button>';
+      h += '<button class="btn primary" style="width:100%;margin-bottom:8px;" data-action="doSyncNow"'+(state.syncing?' disabled':'')+'>'+(state.syncing?'<span class="spinner"></span>同步中…':'☁️ 立即同步')+'</button>';
       h += '<button class="btn danger" style="width:100%;" data-action="unlinkSync">移除這台裝置的同步設定</button>';
     }
     return h;
@@ -864,11 +920,10 @@
     h += '<div class="settings-title">固定收支管理</div>';
     if (!data.recurring.length){ h += '<div class="empty-note">還沒有固定收支項目</div>'; }
     data.recurring.forEach(function(def){
-      h += '<div class="def-row'+(def.active?'':' inactive')+'">';
+      h += '<div class="def-row'+(def.active?'':' inactive')+'" data-action="editRecurring" data-id="'+def.id+'">';
       h += '<div class="cat">'+catIcon(def.categoryId)+'</div>';
       h += '<div class="meta"><div class="t1">'+escapeHtml(def.title)+'</div><div class="t2">'+freqLabel(def)+(def.active?'':'　（已停用）')+'</div></div>';
       h += '<div class="amt '+def.type+'">'+(def.type==='expense'?'-':'+')+fmtAmt(def.amount)+'</div>';
-      h += '<button class="icon-btn" data-action="editRecurring" data-id="'+def.id+'">✎</button>';
       h += '<button class="icon-btn" data-action="deleteRecurring" data-id="'+def.id+'">🗑</button>';
       h += '</div>';
     });
@@ -1369,7 +1424,7 @@
         render();
         break;
       case 'newRecurring':
-        state.recurringDraft = { id:null, title:'', type:'expense', amount:0, categoryId:data.categories[0]?data.categories[0].id:null, frequency:'monthly', dayOfMonth:1, dayOfWeek:1, active:true };
+        state.recurringDraft = { id:null, title:'', type:'expense', amount:0, categoryId:data.categories[0]?data.categories[0].id:null, frequency:'monthly', dayOfMonth:1, dayOfWeek:1, active:true, startDate: todayStr() };
         state.settingsView = 'recurringForm';
         render();
         break;
@@ -1484,16 +1539,20 @@
 
       case 'doSyncNow': {
         var syncTok = getSyncToken();
+        state.syncing = true;
+        render();
         syncFetchMeta(syncTok, function(err, remoteModified){
-          if (err){ showAlert(syncErrorMessage(err)); return; }
+          if (err){ state.syncing = false; render(); showAlert(syncErrorMessage(err)); return; }
           var remoteChanged = syncMeta.lastSyncedRemoteTime !== remoteModified;
           var localChanged = (syncMeta.lastLocalChangeTime||0) > (syncMeta.lastSyncedRemoteTime||0);
           if (remoteChanged && localChanged){
+            state.syncing = false;
             state.subSheet = { kind:'syncConflict' };
             render();
           } else if (remoteChanged){
             syncFetchFull(syncTok, function(err2, payload){
-              if (err2){ showAlert(syncErrorMessage(err2)); return; }
+              state.syncing = false;
+              if (err2){ render(); showAlert(syncErrorMessage(err2)); return; }
               applySyncPayload(payload);
               syncMeta.lastSyncedRemoteTime = remoteModified;
               syncMeta.lastLocalChangeTime = remoteModified;
@@ -1502,14 +1561,17 @@
             });
           } else if (localChanged){
             syncPush(syncTok, function(err2, lastModified){
-              if (err2){ showAlert(syncErrorMessage(err2)); return; }
+              state.syncing = false;
+              if (err2){ render(); showAlert(syncErrorMessage(err2)); return; }
               syncMeta.lastSyncedRemoteTime = lastModified;
               syncMeta.lastLocalChangeTime = lastModified;
               saveSyncMeta();
               render();
             });
           } else {
-            showAlert('已經是最新的，不用同步');
+            state.syncing = false;
+            render();
+            showAlert('已同步最新的資料');
           }
         });
         break;
@@ -1590,6 +1652,7 @@
           data.recurring = obj.recurring || [];
           data.skip = obj.skip || [];
           data.categories = obj.categories && obj.categories.length ? obj.categories : DEFAULT_CATEGORIES.slice();
+          ensureRecurringStartDates();
           persist();
           state.view = todayStr();
           render();
