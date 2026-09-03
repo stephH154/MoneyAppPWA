@@ -210,6 +210,13 @@
     width:100%;max-width:460px;max-height:92vh;background:var(--card);border-radius:22px 22px 0 0;
     padding:8px 18px calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:12px;overflow-y:auto;
   }
+  /* 記一筆/其他 sheet 表單在手機寬度把捲軸藏起來，但保留手指滑動捲動的功能——使用者原話
+     「把記一筆的滑動條在手機板上隱藏，同時保持它滑動的功能性」。只在手機寬度隱藏（桌面維持
+     原生捲軸），所以直接包在 max-width 的 @media 裡，desktop 那邊完全不用另外復原。 */
+  @media (max-width:719.98px){
+    .sheet{ scrollbar-width:none; -ms-overflow-style:none; }
+    .sheet::-webkit-scrollbar{ display:none; }
+  }
   /* small focused pickers/dialogs (calendar, new-category) always float centered, on every
      viewport, instead of bottom-anchored like the full-height 記一筆 form -- compound class so it
      wins on specificity regardless of source order (see the earlier @media ordering lesson). */
@@ -304,6 +311,52 @@
   .preview-list .pv-row+.pv-row{border-top:1px solid var(--rule);}
   .preview-list .pv-row .k{color:var(--ink-soft);}
   .preview-actions{display:flex;gap:8px;}
+  /* ---------- 首次啟動導覽 ---------- */
+  .onboarding-overlay{
+    flex:1;min-width:0;position:relative;background:var(--paper);
+    display:flex;flex-direction:column;padding:20px 24px calc(24px + env(safe-area-inset-bottom));
+  }
+  .onboarding-skip{
+    align-self:flex-end;font-size:12px;color:var(--ink-soft);background:none;
+    border:1px solid var(--rule);border-radius:20px;padding:5px 14px;
+  }
+  .onboarding-body{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:16px;text-align:center;padding:0 12px;touch-action:pan-y;cursor:pointer;
+  }
+  /* full innerHTML rebuild on every render() means the old slide is simply gone by the time the
+     new one exists -- no old-slide-slides-out counterpart, just the incoming slide animating in
+     from the direction it logically came from. animation (not transition) plays automatically on
+     insertion, which is exactly what a freshly-rebuilt element needs. */
+  @keyframes onboardingSlideNext{ from{ transform:translateX(20px); opacity:0; } to{ transform:translateX(0); opacity:1; } }
+  @keyframes onboardingSlidePrev{ from{ transform:translateX(-20px); opacity:0; } to{ transform:translateX(0); opacity:1; } }
+  .onboarding-anim-next{ animation:onboardingSlideNext .22s ease-out; }
+  .onboarding-anim-prev{ animation:onboardingSlidePrev .22s ease-out; }
+  @media (prefers-reduced-motion:reduce){
+    .onboarding-anim-next, .onboarding-anim-prev{ animation:none; }
+  }
+  .onboarding-icon{font-size:56px;}
+  .onboarding-title{font-size:20px;font-weight:600;}
+  .onboarding-desc{font-size:13px;color:var(--ink-soft);line-height:1.7;max-width:280px;}
+  .onboarding-footer{display:flex;flex-direction:column;gap:14px;}
+  .onboarding-dots{display:flex;justify-content:center;gap:6px;}
+  .onboarding-dots span{width:6px;height:6px;border-radius:50%;background:var(--rule-strong);}
+  .onboarding-dots span.on{background:var(--accent);width:16px;border-radius:4px;}
+  .onboarding-mock{width:100%;max-width:260px;background:var(--paper);border:1px solid var(--rule);border-radius:14px;padding:8px 14px;text-align:left;font-size:12px;}
+  .onboarding-mock-row{display:flex;align-items:center;gap:8px;padding:6px 0;}
+  .onboarding-mock-row+.onboarding-mock-row{border-top:1px dashed var(--rule);}
+  .onboarding-mock-ic{font-size:15px;width:18px;text-align:center;flex:none;}
+  .onboarding-mock-title{flex:1;}
+  .onboarding-mock-amt{font-weight:600;font-variant-numeric:tabular-nums;flex:none;}
+  .onboarding-mock-amt.exp{color:var(--expense);}
+  .onboarding-mock-amt.inc{color:var(--income);}
+  .onboarding-mock-tag{font-size:9px;font-weight:600;color:var(--expense);background:var(--expense-bg);border-radius:999px;padding:2px 7px;flex:none;}
+  .onboarding-mock-donut{display:flex;align-items:center;gap:14px;}
+  .onboarding-donut-mini{width:44px;height:44px;border-radius:50%;flex:none;background:conic-gradient(#a3402c 0% 45%, #c9932f 45% 72%, #5c8a3c 72% 100%);}
+  .onboarding-mock-legend{display:flex;flex-direction:column;gap:4px;font-size:11px;}
+  .onboarding-mock-legend div{display:flex;align-items:center;gap:6px;}
+  .onboarding-mock-sync{text-align:center;font-size:20px;letter-spacing:2px;padding:14px;}
+
   /* ---------- 總結 tab ---------- */
   .round-btn.small{width:24px;height:24px;font-size:12px;}
   .period-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
@@ -368,7 +421,7 @@
 
   // 每次真的要上版部署時把這個號碼加一（跟 sw.js 裡同名常數各自維護，建議一起 bump）。
   // 純粹拿來顯示在「設定」頁面最下面，方便確認目前跑的是不是最新版本。
-  var APP_VERSION = 'v1.4.0';
+  var APP_VERSION = 'v1.6.2';
 
   // 貼上你自己部署的 Apps Script /exec 網址（見 ledger-cloud-sync-apps-script.txt）。
   // 留空的話「雲端同步」設定頁會顯示「還沒設定」，其餘功能不受影響。
@@ -376,6 +429,7 @@
 
   /* ================= storage ================= */
   var KEYS = { tx:'xzb_transactions', rec:'xzb_recurring', skip:'xzb_skip', cat:'xzb_categories' };
+  var ONBOARDED_KEY = 'xzb_onboarded';
 
   function loadArr(key){
     try { var v = JSON.parse(localStorage.getItem(key)); return Array.isArray(v) ? v : []; }
@@ -619,9 +673,14 @@
   function shiftPeriod(unit, anchor, dir){
     var d = parseDate(anchor);
     if (unit === 'week'){ d.setDate(d.getDate() + dir*7); return toStr(d); }
-    if (unit === 'month'){ d.setMonth(d.getMonth() + dir); return toStr(d); }
-    if (unit === 'quarter'){ d.setMonth(d.getMonth() + dir*3); return toStr(d); }
-    d.setFullYear(d.getFullYear() + dir); return toStr(d);
+    // month/quarter/year: construct with day=1 instead of setMonth()/setFullYear() on the
+    // original day-of-month -- day 31 (or Feb 29) doesn't exist in every target month/year, and
+    // Date silently overflows into a LATER month when it doesn't (e.g. Jan 31 -> setMonth(+1) ->
+    // "Feb 31" rolls to Mar 3, skipping February entirely). day=1 always exists, so this can't
+    // overflow; periodStart()/periodEnd() only care which month/year the anchor lands in anyway.
+    if (unit === 'month') return toStr(new Date(d.getFullYear(), d.getMonth()+dir, 1));
+    if (unit === 'quarter') return toStr(new Date(d.getFullYear(), d.getMonth()+dir*3, 1));
+    return toStr(new Date(d.getFullYear()+dir, 0, 1));
   }
   function periodLabel(unit, start, end){
     var s = parseDate(start);
@@ -707,8 +766,15 @@
     recurringDraft: null,
     syncing: false, // true while 立即同步 has an in-flight request -- drives the spinner button state
     linking: false, // true while 連結雲端同步 has an in-flight request -- drives its spinner state
+    resolving: false, // true while a syncConflict/linkOverwriteChoice button's request is in flight --
+                       // disables every button in that dialog so a double-tap can't fire two
+                       // resolutions (本機/雲端/合併) before either one's push/pull actually lands
     linkTokenDraft: null, // editable draft for the not-yet-linked token input; null = empty, no default
-    summary: { unit:'month', anchor: todayStr(), type:'expense' }
+    summary: { unit:'month', anchor: todayStr(), type:'expense' },
+    // null = not showing; a number = which slide is up. Only starts at 0 on a genuinely fresh
+    // install (the ONBOARDED_KEY flag, not "no transactions yet" -- 清除所有資料 shouldn't force
+    // it to replay).
+    onboardingStep: localStorage.getItem(ONBOARDED_KEY) ? null : 0
   };
 
   function activeCalendar(){
@@ -755,6 +821,12 @@
   var root = document.getElementById('app');
 
   function render(){
+    // first-launch onboarding takes over the whole root -- nothing else in the app is reachable
+    // (or needs the scroll-snapshot dance below) while it's showing.
+    if (state.onboardingStep !== null){
+      root.innerHTML = renderOnboarding();
+      return;
+    }
     // full innerHTML rebuild wipes scroll position on any state change (e.g. picking a
     // category chip mid-scroll) -- snapshot the scroll offsets that matter and restore
     // them after the rebuild instead of doing a more surgical (and much more complex) patch.
@@ -1002,6 +1074,63 @@
     return h;
   }
 
+  /* ================= first-launch onboarding ================= */
+  // wording kept deliberately plain/concrete (使用者原話「wording要user friendly，讓小學生都看得懂」)
+  // -- no jargon like 固定收支/雲端同步 used as if the reader already knows what those mean.
+  // which direction the CURRENT slide should animate in from -- set right before every
+  // state.onboardingStep change, read once by renderOnboarding() on the render that follows.
+  var onboardingDir = 'next';
+  var ONBOARDING_SLIDES = [
+    { icon:'🐳', title:'嗨！歡迎使用小帳本', desc:'這是一本會幫你記錢的小本子。花30秒，帶你看看它會做什麼！' },
+    { icon:'✏️', title:'想到就記一筆', desc:'點一下右下角的「＋」，選你花了多少錢、買了什麼，一下子就記好了！',
+      mock: '<div class="onboarding-mock">'
+        + '<div class="onboarding-mock-row"><span class="onboarding-mock-ic">🍜</span><span class="onboarding-mock-title">午餐</span><span class="onboarding-mock-amt exp">-120</span></div>'
+        + '<div class="onboarding-mock-row"><span class="onboarding-mock-ic">💰</span><span class="onboarding-mock-title">薪水</span><span class="onboarding-mock-amt inc">+55,000</span></div>'
+        + '</div>' },
+    { icon:'🔁', title:'每個月都要繳的錢', desc:'像房租、薪水這種每個月都會出現的錢，小帳本會自動提醒你，不用自己記日子！',
+      mock: '<div class="onboarding-mock">'
+        + '<div class="onboarding-mock-row"><span class="onboarding-mock-tag">快到期</span><span class="onboarding-mock-ic">🏠</span><span class="onboarding-mock-title">房租</span><span class="onboarding-mock-amt exp">-15,000</span></div>'
+        + '</div>' },
+    { icon:'📊', title:'看看錢都花去哪了', desc:'小帳本會幫你畫一張圖，告訴你這個月的錢都花在什麼地方。',
+      mock: '<div class="onboarding-mock onboarding-mock-donut">'
+        + '<div class="onboarding-donut-mini"></div>'
+        + '<div class="onboarding-mock-legend">'
+        + '<div><span class="dot" style="background:#a3402c;"></span>居住</div>'
+        + '<div><span class="dot" style="background:#c9932f;"></span>餐飲</div>'
+        + '<div><span class="dot" style="background:#5c8a3c;"></span>其他</div>'
+        + '</div></div>' },
+    { icon:'☁️', title:'手機、電腦都能用', desc:'想要在不同裝置上看到一樣的資料嗎？跟管理員要一組密碼就可以囉！',
+      mock: '<div class="onboarding-mock onboarding-mock-sync">📱　⇄　☁️　⇄　💻</div>' }
+  ];
+  function finishOnboarding(){
+    localStorage.setItem(ONBOARDED_KEY, '1');
+    state.onboardingStep = null;
+    render();
+  }
+  function renderOnboarding(){
+    var i = state.onboardingStep;
+    var s = ONBOARDING_SLIDES[i];
+    var isLast = i === ONBOARDING_SLIDES.length - 1;
+    var h = '<div class="onboarding-overlay">';
+    h += '<button class="onboarding-skip" data-action="onboardingSkip">略過</button>';
+    // 使用者原話「可以按一下翻頁...左滑可以回到上一頁 右滑可以到下一頁」-- tap-anywhere/swipe
+    // is handled entirely by the pointerdown/move/up trio below (see obSwipe), not a data-action,
+    // so there's no risk of the tap ALSO firing a separate click-delegated handler on the same body.
+    h += '<div class="onboarding-body onboarding-anim-'+onboardingDir+'">';
+    h += '<div class="onboarding-icon">'+s.icon+'</div>';
+    h += '<div class="onboarding-title serif">'+escapeHtml(s.title)+'</div>';
+    h += '<div class="onboarding-desc">'+escapeHtml(s.desc)+'</div>';
+    if (s.mock) h += s.mock;
+    h += '</div>';
+    h += '<div class="onboarding-footer">';
+    h += '<div class="onboarding-dots">';
+    ONBOARDING_SLIDES.forEach(function(_, idx){ h += '<span class="'+(idx===i?'on':'')+'"></span>'; });
+    h += '</div>';
+    if (isLast) h += '<button class="btn primary" style="width:100%;" data-action="onboardingNext">開始使用</button>';
+    h += '</div></div>';
+    return h;
+  }
+
   function renderDesktopPanel(){
     var h = '';
     h += '<button class="settings-menu-btn" data-action="openFloatPanel" data-view="recurring"><span class="ic">🔁</span>固定收支管理</button>';
@@ -1038,6 +1167,8 @@
     h += '<button class="settings-menu-btn" data-action="exportBackup"><span class="ic">📤</span>匯出備份</button>';
     h += '<label class="settings-menu-btn" style="display:flex;"><span class="ic">📥</span>匯入備份<input type="file" accept="application/json" id="importFile" style="display:none;"></label>';
     h += '<button class="settings-menu-btn" data-action="clearAll" style="color:var(--expense);"><span class="ic">🗑️</span>清除所有資料</button>';
+    h += '<a class="settings-menu-btn" href="guide.html" target="_blank" style="display:flex;text-decoration:none;color:inherit;"><span class="ic">📖</span>使用手冊</a>';
+    h += '<button class="settings-menu-btn" data-action="replayOnboarding"><span class="ic">🔁</span>重新查看導覽</button>';
     h += '<div class="empty-note" style="padding-top:6px;">小帳本 '+APP_VERSION+'</div>';
     return h;
   }
@@ -1065,26 +1196,31 @@
   }
 
   function renderSyncConflictSheet(){
+    // state.resolving disables every button here while one of the three choices below has a
+    // request in flight -- otherwise a double-tap could fire two of them (本機/雲端/合併) before
+    // either's push/pull actually lands, and whichever resolves last silently wins.
+    var dis = state.resolving ? ' disabled' : '';
     var h = '<div class="backdrop center-modal" data-action="closeSyncConflict">';
     h += '<div class="sheet center-modal alert-sheet" data-stop="1">';
-    h += '<div class="sheet-head"><h3>同步衝突</h3><button class="x" data-action="closeSyncConflict">✕</button></div>';
-    h += '<div class="alert-message">本機和雲端自從上次同步後都有新的變更，要保留哪一邊？（也可以合併兩邊）</div>';
-    h += '<button class="btn primary" style="width:100%;margin-bottom:8px;" data-action="syncKeepLocal">用本機覆蓋雲端</button>';
-    h += '<button class="btn" style="width:100%;margin-bottom:8px;" data-action="syncKeepRemote">用雲端覆蓋本機</button>';
-    h += '<button class="btn" style="width:100%;" data-action="syncMerge">合併資料</button>';
+    h += '<div class="sheet-head"><h3>同步衝突</h3><button class="x" data-action="closeSyncConflict"'+dis+'>✕</button></div>';
+    h += '<div class="alert-message">本機和雲端自從上次同步後都有新的變更，要保留哪一邊？（也可以合併兩邊）'+(state.resolving?'<br><br>處理中…':'')+'</div>';
+    h += '<button class="btn primary" style="width:100%;margin-bottom:8px;" data-action="syncKeepLocal"'+dis+'>用本機覆蓋雲端</button>';
+    h += '<button class="btn" style="width:100%;margin-bottom:8px;" data-action="syncKeepRemote"'+dis+'>用雲端覆蓋本機</button>';
+    h += '<button class="btn" style="width:100%;" data-action="syncMerge"'+dis+'>合併資料</button>';
     h += '</div></div>';
     return h;
   }
 
   function renderLinkOverwriteChoiceSheet(s){
+    var dis = state.resolving ? ' disabled' : '';
     var h = '<div class="backdrop center-modal" data-action="closeLinkOverwriteChoice">';
     h += '<div class="sheet center-modal alert-sheet" data-stop="1">';
-    h += '<div class="sheet-head"><h3>雲端已有資料</h3><button class="x" data-action="closeLinkOverwriteChoice">✕</button></div>';
-    h += '<div class="alert-message">本機目前：'+s.localN.tx+' 筆帳目・'+s.localN.rec+' 筆固定收支・'+s.localN.cat+' 個分類\n雲端　　：'+s.remoteN.tx+' 筆帳目・'+s.remoteN.rec+' 筆固定收支・'+s.remoteN.cat+' 個分類</div>';
-    h += '<button class="btn primary" style="width:100%;margin-bottom:8px;" data-action="linkKeepLocal">用本機覆蓋雲端</button>';
-    h += '<button class="btn" style="width:100%;margin-bottom:8px;" data-action="linkKeepRemote">用雲端覆蓋本機</button>';
-    h += '<button class="btn" style="width:100%;margin-bottom:8px;" data-action="linkMerge">合併資料</button>';
-    h += '<button class="btn" style="width:100%;" data-action="closeLinkOverwriteChoice">取消</button>';
+    h += '<div class="sheet-head"><h3>雲端已有資料</h3><button class="x" data-action="closeLinkOverwriteChoice"'+dis+'>✕</button></div>';
+    h += '<div class="alert-message">本機目前：'+s.localN.tx+' 筆帳目・'+s.localN.rec+' 筆固定收支・'+s.localN.cat+' 個分類\n雲端　　：'+s.remoteN.tx+' 筆帳目・'+s.remoteN.rec+' 筆固定收支・'+s.remoteN.cat+' 個分類'+(state.resolving?'\n\n處理中…':'')+'</div>';
+    h += '<button class="btn primary" style="width:100%;margin-bottom:8px;" data-action="linkKeepLocal"'+dis+'>用本機覆蓋雲端</button>';
+    h += '<button class="btn" style="width:100%;margin-bottom:8px;" data-action="linkKeepRemote"'+dis+'>用雲端覆蓋本機</button>';
+    h += '<button class="btn" style="width:100%;margin-bottom:8px;" data-action="linkMerge"'+dis+'>合併資料</button>';
+    h += '<button class="btn" style="width:100%;" data-action="closeLinkOverwriteChoice"'+dis+'>取消</button>';
     h += '</div></div>';
     return h;
   }
@@ -1429,6 +1565,18 @@
       case 'nextDay': if (state.view < todayStr()) { state.view = addDays(state.view, 1); render(); } break;
       case 'goToday': state.view = todayStr(); render(); break;
       case 'tab': state.tab = el.getAttribute('data-tab'); state.settingsView=null; state.sheet=null; state.subSheet=null; render(); break;
+
+      case 'onboardingNext': // only rendered on the last slide now -- always just finishes
+        finishOnboarding();
+        break;
+      case 'onboardingSkip':
+        finishOnboarding();
+        break;
+      case 'replayOnboarding':
+        onboardingDir = 'next';
+        state.onboardingStep = 0;
+        render();
+        break;
 
       case 'setSummaryUnit':
         state.summary.unit = el.getAttribute('data-unit');
@@ -1804,7 +1952,10 @@
         break;
       case 'syncKeepLocal': {
         var keepLocalTok = getSyncToken();
+        state.resolving = true;
+        render();
         syncPush(keepLocalTok, function(err, lastModified){
+          state.resolving = false;
           state.subSheet = null;
           if (err){ showAlert(syncErrorMessage(err)); render(); return; }
           syncMeta.lastSyncedRemoteTime = lastModified;
@@ -1816,11 +1967,14 @@
       }
       case 'syncKeepRemote': {
         var keepRemoteTok = getSyncToken();
+        state.resolving = true;
+        render();
         syncFetchFull(keepRemoteTok, function(err, payload){
-          state.subSheet = null;
-          if (err){ showAlert(syncErrorMessage(err)); render(); return; }
+          if (err){ state.resolving = false; state.subSheet = null; showAlert(syncErrorMessage(err)); render(); return; }
           applySyncPayload(payload);
           syncFetchMeta(keepRemoteTok, function(err2, lastModified){
+            state.resolving = false;
+            state.subSheet = null;
             syncMeta.lastSyncedRemoteTime = lastModified || Date.now();
             syncMeta.lastLocalChangeTime = syncMeta.lastSyncedRemoteTime;
             saveSyncMeta();
@@ -1831,11 +1985,19 @@
       }
       case 'syncMerge': {
         var mergeTok = getSyncToken();
+        state.resolving = true;
+        render();
         syncFetchFull(mergeTok, function(err, remotePayload){
-          if (err){ state.subSheet = null; render(); showAlert(syncErrorMessage(err)); return; }
+          if (err){ state.resolving = false; state.subSheet = null; render(); showAlert(syncErrorMessage(err)); return; }
           var merged = mergeSyncPayloads(getSyncPayload(), remotePayload);
           applySyncPayload(merged);
+          // mark the merge as a pending local change up front, not only inside the push's success
+          // branch -- a failed push must still leave syncMeta showing "local changed", or the next
+          // sync check has no way to know this merge still needs to reach the cloud.
+          syncMeta.lastLocalChangeTime = Date.now();
+          saveSyncMeta();
           syncPush(mergeTok, function(err2, lastModified){
+            state.resolving = false;
             state.subSheet = null;
             if (err2){ showAlert(syncErrorMessage(err2)); render(); return; }
             syncMeta.lastSyncedRemoteTime = lastModified;
@@ -1852,8 +2014,11 @@
         break;
       case 'linkKeepLocal': {
         var s1 = state.subSheet;
+        state.resolving = true;
+        render();
         setSyncToken(s1.linkVal);
         syncPush(s1.linkVal, function(err, lastModified){
+          state.resolving = false;
           state.subSheet = null;
           if (err){ showAlert(syncErrorMessage(err)); render(); return; }
           syncMeta.lastSyncedRemoteTime = lastModified;
@@ -1865,10 +2030,13 @@
       }
       case 'linkKeepRemote': {
         var s2 = state.subSheet;
+        state.resolving = true;
+        render();
         setSyncToken(s2.linkVal);
         applySyncPayload(s2.payload);
-        state.subSheet = null;
         syncFetchMeta(s2.linkVal, function(err, lastModified){
+          state.resolving = false;
+          state.subSheet = null;
           syncMeta.lastSyncedRemoteTime = lastModified || Date.now();
           syncMeta.lastLocalChangeTime = syncMeta.lastSyncedRemoteTime;
           saveSyncMeta();
@@ -1878,11 +2046,19 @@
       }
       case 'linkMerge': {
         var s3 = state.subSheet;
+        state.resolving = true;
+        render();
         var merged = mergeSyncPayloads(getSyncPayload(), s3.payload);
         setSyncToken(s3.linkVal);
         applySyncPayload(merged);
-        state.subSheet = null;
+        // same reasoning as syncMerge above -- a failed push must still leave syncMeta marked
+        // as locally changed so the next sync attempt knows to retry, instead of silently
+        // looking "already in sync" with a merge that never actually reached the cloud.
+        syncMeta.lastLocalChangeTime = Date.now();
+        saveSyncMeta();
         syncPush(s3.linkVal, function(err, lastModified){
+          state.resolving = false;
+          state.subSheet = null;
           if (err){ showAlert(syncErrorMessage(err)); render(); return; }
           syncMeta.lastSyncedRemoteTime = lastModified;
           syncMeta.lastLocalChangeTime = lastModified;
@@ -2007,6 +2183,53 @@
   document.addEventListener('pointercancel', function(){
     if (swipe.el){ swipe.el.style.transform=''; swipe.el.style.opacity=''; }
     swipe.pointerId = null; swipe.el = null; swipe.dragging = false;
+  });
+
+  /* ================= 首次啟動導覽: tap 翻頁 / 左右滑 ================= */
+  // 左滑＝下一頁、右滑＝上一頁，跟一般輪播/相簿慣例一致。使用者一開始講反了（左滑回上一頁、
+  // 右滑到下一頁），自己發現後主動更正成這個方向。
+  var obSwipe = { pointerId:null, startX:0, startY:0, dragging:false };
+  document.addEventListener('pointerdown', function(e){
+    if (!e.target.closest('.onboarding-body')) return;
+    if (obSwipe.pointerId !== null) return;
+    obSwipe.pointerId = e.pointerId;
+    obSwipe.startX = e.clientX; obSwipe.startY = e.clientY;
+    obSwipe.dragging = false;
+  });
+  document.addEventListener('pointermove', function(e){
+    if (obSwipe.pointerId !== e.pointerId) return;
+    var dx = e.clientX - obSwipe.startX, dy = e.clientY - obSwipe.startY;
+    if (!obSwipe.dragging){
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      if (Math.abs(dy) > Math.abs(dx)) { obSwipe.pointerId = null; return; } // vertical scroll intent, bail
+      obSwipe.dragging = true;
+    }
+  });
+  document.addEventListener('pointerup', function(e){
+    if (obSwipe.pointerId !== e.pointerId) return;
+    var dx = e.clientX - obSwipe.startX;
+    var wasDragging = obSwipe.dragging;
+    obSwipe.pointerId = null; obSwipe.dragging = false;
+    if (state.onboardingStep === null) return;
+    var isLast = state.onboardingStep === ONBOARDING_SLIDES.length - 1;
+    if (!wasDragging){
+      onboardingDir = 'next';
+      if (isLast) finishOnboarding(); else { state.onboardingStep++; render(); }
+    } else if (dx <= -50){
+      // 左滑 = 下一頁
+      onboardingDir = 'next';
+      if (isLast) finishOnboarding(); else { state.onboardingStep++; render(); }
+    } else if (dx >= 50){
+      // 右滑 = 上一頁
+      onboardingDir = 'prev';
+      if (state.onboardingStep > 0){ state.onboardingStep--; render(); }
+    }
+    // a drag that crossed the 8px tap threshold but never reached the 50px swipe threshold --
+    // deliberately does nothing, stays on the current slide.
+  });
+  document.addEventListener('pointercancel', function(e){
+    if (obSwipe.pointerId !== e.pointerId) return;
+    obSwipe.pointerId = null; obSwipe.dragging = false;
   });
 
   /* ================= 分類管理: drag-to-reorder ================= */

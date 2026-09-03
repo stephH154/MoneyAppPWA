@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>使用手冊</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #efe6d2;
+    --card: #fbf7ec;
+    --border: #ddd0af;
+    --ink: #2d2620;
+    --muted: #7d715c;
+    --red: #a3402c;
+    --red-soft: #f4e2d9;
+    --green: #4b6b3c;
+    --green-soft: #e3ead6;
+    --amber: #a97a1f;
+    --amber-soft: #f2e5c4;
+    --accent: #8c5a3c;
+    --shadow: 0 1px 2px rgba(45,38,32,.05), 0 12px 28px rgba(45,38,32,.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    padding: 48px 20px 90px;
+  }
+  .shell { max-width: 720px; margin: 0 auto; }
+  .eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+  h1 { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 28px; margin: 0 0 8px; }
+  .intro { font-size: 13.5px; color: var(--muted); line-height: 1.7; margin: 0 0 28px; max-width: 60ch; }
+
+  nav.toc { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 16px 20px; margin-bottom: 36px; box-shadow: var(--shadow); }
+  nav.toc .toc-title { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 24px; font-size: 12.5px; line-height: 1.9; }
+  nav.toc a { color: var(--ink); text-decoration: none; }
+  nav.toc a:hover { color: var(--red); text-decoration: underline; }
+  @media (max-width: 480px) {
+    body { padding: 32px 16px 60px; }
+    h1 { font-size: 24px; }
+    nav.toc ol { columns: 1; }
+  }
+
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 22px 24px; margin-bottom: 20px; box-shadow: var(--shadow); scroll-margin-top: 20px; }
+  section h2 { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 18px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+  section h2 .num { color: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 13px; font-weight: 600; }
+  section p { font-size: 13px; line-height: 1.7; color: var(--ink); margin: 8px 0; }
+  section p.muted { color: var(--muted); font-size: 12px; }
+  section ul { font-size: 13px; line-height: 1.75; padding-left: 20px; margin: 8px 0; }
+  section code { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+
+  .mock { background: var(--bg); border: 1px dashed var(--border); border-radius: 12px; padding: 12px 14px; margin: 12px 0; font-size: 12.5px; }
+  .mock-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px dashed var(--border); }
+  .mock-row:last-child { border-bottom: none; }
+  .mock-ic { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; }
+  .mock-title { flex: 1; }
+  .mock-amt { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .mock-amt.exp { color: var(--red); }
+  .mock-amt.inc { color: var(--green); }
+  .mock-tag { font-size: 9.5px; font-weight: 600; padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+  .mock-tag.red { color: var(--red); background: var(--red-soft); }
+  .mock-tag.green { color: var(--green); background: var(--green-soft); }
+  .mock-tag.amber { color: var(--amber); background: var(--amber-soft); }
+  .mock-tag.muted { color: var(--muted); background: var(--card); border: 1px solid var(--border); }
+  .mock-note { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 8px; }
+  .mock-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-right: 8px; }
+  .mock-seg span { padding: 4px 8px; font-size: 11px; color: var(--muted); }
+  .mock-seg span.on { background: var(--accent); color: #fdf6ea; font-weight: 600; }
+
+  .donut-mini { width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
+    background: conic-gradient(var(--red) 0% 45%, var(--amber) 45% 72%, var(--green) 72% 100%); }
+
+  .dual { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
+  .dual-col { min-width: 0; }
+  .dual-col + .dual-col { border-left: 1px solid var(--border); padding-left: 16px; }
+  .dual-label { font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--muted); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .dual-col p, .dual-col ul { margin: 0 0 6px; }
+  .dual-col ul { padding-left: 18px; }
+  @media (max-width: 600px) {
+    .dual { grid-template-columns: 1fr; }
+    .dual-col + .dual-col { border-left: none; padding-left: 0; border-top: 1px dashed var(--border); padding-top: 12px; margin-top: 4px; }
+  }
+
+  .swipe-demo { position: relative; overflow: hidden; border-radius: 10px; }
+  .swipe-demo .bg { position: absolute; inset: 0; background: var(--red); color: #fff; display: flex; align-items: center; padding-left: 16px; font-size: 12px; font-weight: 700; }
+  .swipe-demo .front { position: relative; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; transform: translateX(38%); display: flex; align-items: center; gap: 8px; }
+
+  .limits { display: grid; gap: 10px; }
+  .limit-item { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; line-height: 1.6; }
+  .limit-item .mark { color: var(--red); flex-shrink: 0; font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <p class="eyebrow">小帳本</p>
+  <h1>使用手冊</h1>
+  <p class="intro">這頁整理「小帳本」目前的所有功能跟操作方式，附示意圖。設定選單最下面「📖 使用手冊」會連到這裡。</p>
+
+  <nav class="toc">
+    <div class="toc-title">目錄</div>
+    <ol>
+      <li><a href="#basics">帳本怎麼用</a></li>
+      <li><a href="#addtx">記一筆</a></li>
+      <li><a href="#swipe">滑除刪除</a></li>
+      <li><a href="#categories">分類</a></li>
+      <li><a href="#recurring">固定收支</a></li>
+      <li><a href="#summary">總結</a></li>
+      <li><a href="#sync">雲端同步</a></li>
+      <li><a href="#backup">備份 / 清除資料</a></li>
+      <li><a href="#pwa">安裝成 App（PWA）</a></li>
+      <li><a href="#limits">已知限制</a></li>
+    </ol>
+  </nav>
+
+  <section id="basics">
+    <h2><span class="num">01</span> 帳本怎麼用</h2>
+    <p>打開就是「帳本」分頁，顯示「今天」這張卡片。標題日期兩側的 ‹ › 箭頭往回翻看過去的日子（過去的帳目一樣可以直接改，不是唯讀），但不能往前翻到未來——點標題日期本身可以直接跳月曆選日期。</p>
+    <div class="mock">
+      <div class="mock-row"><div class="mock-ic">🍜</div><div class="mock-title">午餐</div><div class="mock-amt exp">-120</div></div>
+      <div class="mock-row"><div class="mock-ic">💰</div><div class="mock-title">薪資</div><div class="mock-amt inc">+55,000</div></div>
+    </div>
+    <p class="muted">卡片下方固定夾著今日／當日收入・支出・淨額，跟本月結餘，不會隨清單捲動被推走；清單本身有上限高度、超過會在清單區塊內自己捲動，不會撐大整張卡片。</p>
+    <div class="dual">
+      <div class="dual-col">
+        <div class="dual-label">📱 手機</div>
+        <p>點一筆帳目 = 唯讀預覽彈窗，裡面才有「編輯」按鈕——觸控誤觸代價比滑鼠高，多一層確認再進可編輯狀態。</p>
+      </div>
+      <div class="dual-col">
+        <div class="dual-label">🖥️ 電腦</div>
+        <p>桌面沒有底部分頁列，設定/總結都改用常駐側欄的按鈕或浮框，見下面各節說明。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="addtx">
+    <h2><span class="num">02</span> 記一筆</h2>
+    <p>右下角（手機）或標題列（桌面）的「＋ 記一筆」開出表單：日期預設今天但可任選（跟你正在看哪一天無關）、支出／收入切換、分類、金額、備註。</p>
+    <div class="mock">
+      <div class="mock-seg"><span class="on">－ 支出</span><span>＋ 收入</span></div>
+      <div class="mock-note">分類 chip 列會依當下支出/收入自動過濾，只顯示同類型的分類</div>
+    </div>
+    <p class="muted">日期欄位是可點開的月曆選取器，不是打字輸入；分類 chip 列最後一顆「＋ 新增」可以在填表單填到一半直接加新分類，不用中斷。</p>
+  </section>
+
+  <section id="swipe">
+    <h2><span class="num">03</span> 滑除刪除</h2>
+    <p>帳目列往右滑（或用滑鼠拖）過一定距離放開就會刪除，會先變成「已刪除「XXX」＋復原」，5 秒內按復原可以救回來，5 秒到了才真的刪掉。往左滑或滑不夠遠都會彈回原位，不會誤刪。</p>
+    <div class="swipe-demo">
+      <div class="bg">已刪除</div>
+      <div class="front"><div class="mock-ic">🚌</div><div class="mock-title">捷運</div></div>
+    </div>
+    <p class="mock-note">上圖是滑到一半的狀態——繼續滑到底放開才會真的觸發</p>
+  </section>
+
+  <section id="categories">
+    <h2><span class="num">04</span> 分類</h2>
+    <p>每筆帳目要選一個分類，分類正式分「收入」「支出」兩種類型，記一筆表單只會顯示跟當下收/支一致的分類。</p>
+    <p><strong>快速新增</strong>跟<strong>管理（改名／刪除／排序）</strong>是兩個分開的入口：記一筆表單分類 chip 列最後「＋新增」是低風險操作，怎麼方便怎麼來；改名／刪除牽涉既有帳目的顯示、收進設定頁「分類管理」，多一步才會動到。</p>
+    <div class="mock">
+      <div class="mock-row"><span style="color:var(--muted);">⠿</span><div class="mock-ic">🍜</div><div class="mock-title">餐飲</div></div>
+      <div class="mock-row"><span style="color:var(--muted);">⠿</span><div class="mock-ic">🚌</div><div class="mock-title">交通</div></div>
+    </div>
+    <p class="muted">分類管理依收入/支出分兩組顯示，排序是真的用抓握手把（⠿）拖曳，只能在同一組內拖，不會跨組。圖示是按鈕點開 emoji 網格選，不是打字輸入。分類刪除時，原本用這個分類的帳目改標「未分類」，帳目本體不會被刪掉。</p>
+  </section>
+
+  <section id="recurring">
+    <h2><span class="num">05</span> 固定收支</h2>
+    <p>房租、薪水這類每月／每週／每天固定發生的收支，設定一次之後，到了日期會自動出現在當天帳本最上方「待確認」區塊，三個動作：<strong>確認</strong>（正式記一筆）、<strong>延後</strong>（明天再問一次）、<strong>這期跳過</strong>（這期不出現，下期正常）。過了原訂日期沒處理會標記「逾期」，不會自動消失，也不會自動幫你確認。</p>
+    <div class="mock">
+      <div class="mock-row"><div class="mock-tag red">逾期</div><div class="mock-ic">🏠</div><div class="mock-title">房租</div><div class="mock-amt exp">-15,000</div></div>
+    </div>
+    <p class="muted"><strong>剛設定的固定收支不會倒填出一筆逾期</strong>——只會從設定當天開始往後算，不會因為「這個月稍早已經過了原訂日期」就一建立就跳出逾期。</p>
+    <p>設定頁「固定收支管理」列出所有定義（含已停用的），直接點一整列就會打開編輯表單——不需要先點編輯按鈕，因為表單裡本來就有「啟用」勾選框可以控制要不要繼續出現；🗑 刪除是獨立按鈕，會另外跳確認。</p>
+  </section>
+
+  <section id="summary">
+    <h2><span class="num">06</span> 總結</h2>
+    <p>依分類計算選定區間的收入／支出佔比。上方切換週／月／季／年（‹›翻頁，翻到當期就不能再往後）跟支出／收入，中間是甜甜圈圖＋旁邊圖例，下面是詳細清單（圖示、名稱、百分比、金額）。</p>
+    <div class="mock">
+      <div class="mock-row"><div class="donut-mini"></div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:4px;font-size:11px;">
+          <div><span style="color:var(--red);">●</span> 居住 48.7%</div>
+          <div><span style="color:var(--amber);">●</span> 餐飲 27.3%</div>
+          <div><span style="color:var(--green);">●</span> 其他 24.0%</div>
+        </div>
+      </div>
+    </div>
+    <p class="muted">顏色是依「這期排序後的名次」分配一組固定調色盤，不是每個分類自帶固定色——同一分類換一期、排名變了，顏色可能跟著換。</p>
+    <div class="dual">
+      <div class="dual-col">
+        <div class="dual-label">📱 手機</div>
+        <p>底部分頁列「總結」直接進入。</p>
+      </div>
+      <div class="dual-col">
+        <div class="dual-label">🖥️ 電腦</div>
+        <p>常駐側欄「📊 收支統計」按鈕，用浮框打開，跟固定收支管理／分類管理同一套機制。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="sync">
+    <h2><span class="num">07</span> 雲端同步</h2>
+    <p>設定頁「雲端同步」輸入一組專屬密鑰（密鑰要跟系統管理員索取，app 這邊不能自己生一組直接用）就能把資料同步到雲端，跨裝置共用同一份。</p>
+    <p><strong>連結雲端同步</strong>按下去就是連結的動作：如果雲端還沒有資料，直接把本機現有資料當起點推上去；如果雲端已經有資料，會先跳出選擇（附本機/雲端各自的帳目筆數／固定收支筆數／分類個數，方便判斷）：</p>
+    <div class="mock">
+      <div class="mock-row"><div class="mock-title">用本機覆蓋雲端</div></div>
+      <div class="mock-row"><div class="mock-title">用雲端覆蓋本機</div></div>
+      <div class="mock-row"><div class="mock-title">合併資料</div></div>
+      <div class="mock-row"><div class="mock-title">取消</div></div>
+    </div>
+    <p class="muted"><strong>合併資料</strong>：帳目用 id 判斷同一筆，兩邊都有改過的話留比較晚更新的那筆；固定收支跟分類沒有修改時間可比，兩邊衝突時固定留本機這邊，只有其中一邊新增的項目會直接加進來。合併完會把結果推回雲端，兩邊會變成一致。</p>
+    <p>連結之後，<strong>之後每次改動都會自動同步</strong>，不用手動按「立即同步」（改動後幾秒內自動推送；「立即同步」按鈕還在，可以手動立刻觸發，按下去會轉圈圈提示正在處理）。如果兩台裝置各自都有新變更，會跳出跟連結時一樣的三選一（本機／雲端／合併）。</p>
+  </section>
+
+  <section id="backup">
+    <h2><span class="num">08</span> 備份 / 清除資料</h2>
+    <ul>
+      <li><strong>匯出備份</strong>：下載一份完整 JSON（帳目、固定收支、分類都包含），當手動備份用。</li>
+      <li><strong>匯入備份</strong>：讀一個 JSON 檔案整包覆蓋現有資料，匯入前會跳確認。</li>
+      <li><strong>清除所有資料</strong>：把所有資料重置回空的狀態，無法復原。<strong>如果這台裝置目前有連結雲端同步</strong>，會先跳出三選一：「取消同步再清除」（雲端資料保留，只清本機）、「同步清除」（本機跟雲端都清空）、「取消」；沒有連結雲端同步的話就是單純的一次確認。</li>
+    </ul>
+  </section>
+
+  <section id="pwa">
+    <h2><span class="num">09</span> 安裝成 App（PWA）</h2>
+    <p>透過已經部署上線的網址開啟時（不是直接開本機這份 html 檔案），可以把小帳本「安裝」成一個獨立的 App 圖示，離線時也能開起外殼（資料本身在 localStorage，跟安不安裝無關）。</p>
+    <div class="dual">
+      <div class="dual-col">
+        <div class="dual-label">🖥️ 電腦</div>
+        <p>Chrome / Edge 網址列右側的「安裝」圖示，或瀏覽器選單裡找「安裝小帳本」。</p>
+      </div>
+      <div class="dual-col">
+        <div class="dual-label">📱 手機</div>
+        <p>Android（Chrome）：選單「⋮」→「新增至主畫面」。iPhone（Safari）：分享按鈕 →「加入主畫面」。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="limits">
+    <h2><span class="num">10</span> 已知限制</h2>
+    <div class="limits">
+      <div class="limit-item"><span class="mark">·</span>資料存在瀏覽器 <code>localStorage</code>，換瀏覽器或換裝置不會自動有資料，要靠雲端同步或手動匯出/匯入搬過去。</div>
+      <div class="limit-item"><span class="mark">·</span>雲端同步不是即時雙向同步，是「改動後自動推送 + 切回畫面時檢查」，兩邊真的同時改到才需要手動選一份（或合併）。</div>
+      <div class="limit-item"><span class="mark">·</span>「合併資料」只有帳目會比較修改時間，固定收支跟分類沒有時間戳可比，衝突時固定本機優先。</div>
+      <div class="limit-item"><span class="mark">·</span>總結分頁的分類顏色依名次分配，不是每個分類固定一色。</div>
+      <div class="limit-item"><span class="mark">·</span>CSV 匯入銀行對帳單、搜尋、備註側欄、提醒通知、鍵盤快捷鍵、交易列表拖曳排序——這幾項目前都還沒做。</div>
+      <div class="limit-item"><span class="mark">·</span>「安裝成 App」只有透過已部署上線的網址開啟時才有作用，直接開本機這份 html 檔案不會出現安裝選項，其他功能不受影響。</div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

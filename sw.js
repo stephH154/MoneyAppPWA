@@ -3,10 +3,11 @@
 // APP_VERSION 的號碼加一**（跟 daily-ledger.html 裡同名常數的用途一樣，兩邊各自維護、
 // 不用完全同步，但建議一起bump比較好記）——不改號碼的話舊裝置會一直吃到舊的快取內容，
 // 感覺不出其實已經更新過。
-const APP_VERSION = 'v1.4.0';
+const APP_VERSION = 'v1.6.2';
 const CACHE_NAME = 'm-ledger-' + APP_VERSION;
 const APP_SHELL = [
   './daily-ledger.html',
+  './guide.html',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
