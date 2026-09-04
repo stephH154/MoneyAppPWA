@@ -64,6 +64,20 @@
     display:none; font-weight:600;font-size:12px;color:#fdf6ea;background:var(--accent);
     border:none;border-radius:999px;padding:8px 16px;
   }
+  .header-top-row{ display:flex; align-items:center; gap:8px; }
+  .header-top-row .nav-row{ flex:1; }
+  .header-top-spacer{ width:32px; flex:none; }
+  /* search drops down from the header instead of sliding up from the bottom like every other
+     sheet -- 使用者原話「搜尋圖示在上方展開的搜尋就直接從上面下來比較好」-- compound classes on
+     the existing .backdrop/.sheet base (same technique .center-modal already uses) so this wins on
+     specificity regardless of stylesheet order. */
+  .backdrop.search-modal{ align-items:flex-start; }
+  .sheet.search-modal{
+    border-radius:0 0 22px 22px; padding-top:calc(8px + env(safe-area-inset-top));
+  }
+  .sheet.search-modal.search-enter{ animation:searchSlideDown .18s ease-out; }
+  @keyframes searchSlideDown{ from{ transform:translateY(-16px); opacity:0; } to{ transform:translateY(0); opacity:1; } }
+  @media (prefers-reduced-motion:reduce){ .sheet.search-modal.search-enter{ animation:none; } }
   .nav-row{display:flex;align-items:center;justify-content:center;gap:16px;}
   .round-btn{
     width:32px;height:32px;border-radius:50%;border:1px solid var(--rule-strong);
@@ -277,6 +291,11 @@
   }
   .icon-pick-btn.open{ border-color:var(--accent); background:var(--pending-bg); }
   .icon-pick-btn.small{ width:38px; height:38px; border-radius:10px; font-size:17px; }
+  .color-pick-btn{ flex:none; width:52px; height:52px; border-radius:14px; border:1px solid var(--rule-strong); padding:0; }
+  .color-pick-btn.small{ width:38px; height:38px; border-radius:10px; }
+  .color-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:8px; padding:2px; }
+  .color-grid button{ width:100%; aspect-ratio:1; border-radius:10px; border:2px solid transparent; padding:0; }
+  .color-grid button.sel{ border-color:var(--ink); }
   .new-cat-row .name-input{
     flex:1; min-width:0; font-size:14px; border:1px solid var(--rule-strong); border-radius:12px;
     padding:0 12px; height:52px; background:var(--paper); color:var(--ink);
@@ -421,7 +440,7 @@
 
   // 每次真的要上版部署時把這個號碼加一（跟 sw.js 裡同名常數各自維護，建議一起 bump）。
   // 純粹拿來顯示在「設定」頁面最下面，方便確認目前跑的是不是最新版本。
-  var APP_VERSION = 'v1.6.2';
+  var APP_VERSION = 'v1.7.3';
 
   // 貼上你自己部署的 Apps Script /exec 網址（見 ledger-cloud-sync-apps-script.txt）。
   // 留空的話「雲端同步」設定頁會顯示「還沒設定」，其餘功能不受影響。
@@ -437,15 +456,25 @@
   }
   function saveArr(key, arr){ localStorage.setItem(key, JSON.stringify(arr)); }
 
+  // shared 8-color palette: the default swatch choices in the category color picker, AND the
+  // migration fallback for pre-existing categories that never had a color assigned (cycled by
+  // array position -- deterministic, so nothing visibly reshuffles on upgrade). Chosen to be
+  // spread across hues (not clustered in this app's own warm palette) so adjacent swatches/dots
+  // are actually distinguishable -- 使用者原話「預設顏色用對比差更多的試試看」from picking the
+  // 總結 donut's palette earlier; same reasoning applies here.
+  // 16 evenly-spaced hues (24° apart, consistent S/L for a cohesive muted-vintage feel) plus one
+  // neutral taupe -- was 8, doubled per user request ("顏色八個有點少，設16個吧").
+  var CAT_PALETTE = ['#924435','#926a35','#928f35','#709235','#4b9235','#359244','#35926a','#35928f',
+    '#357092','#354b92','#443592','#6a3592','#8f3592','#923570','#92354b','#7d715c'];
   var DEFAULT_CATEGORIES = [
-    {id:'cat_food', name:'餐飲', icon:'🍜', type:'expense'},
-    {id:'cat_transport', name:'交通', icon:'🚌', type:'expense'},
-    {id:'cat_fun', name:'娛樂', icon:'🎬', type:'expense'},
-    {id:'cat_home', name:'居住', icon:'🏠', type:'expense'},
-    {id:'cat_med', name:'醫療', icon:'💊', type:'expense'},
-    {id:'cat_other', name:'其他', icon:'📦', type:'expense'},
-    {id:'cat_salary', name:'薪資', icon:'💰', type:'income'},
-    {id:'cat_bonus', name:'獎金', icon:'🎁', type:'income'}
+    {id:'cat_food', name:'餐飲', icon:'🍜', type:'expense', color:CAT_PALETTE[0]},
+    {id:'cat_transport', name:'交通', icon:'🚌', type:'expense', color:CAT_PALETTE[3]},
+    {id:'cat_fun', name:'娛樂', icon:'🎬', type:'expense', color:CAT_PALETTE[2]},
+    {id:'cat_home', name:'居住', icon:'🏠', type:'expense', color:CAT_PALETTE[5]},
+    {id:'cat_med', name:'醫療', icon:'💊', type:'expense', color:CAT_PALETTE[6]},
+    {id:'cat_other', name:'其他', icon:'📦', type:'expense', color:CAT_PALETTE[7]},
+    {id:'cat_salary', name:'薪資', icon:'💰', type:'income', color:CAT_PALETTE[1]},
+    {id:'cat_bonus', name:'獎金', icon:'🎁', type:'income', color:CAT_PALETTE[4]}
   ];
 
   var data = {
@@ -467,6 +496,16 @@
     });
     if (migrated) saveArr(KEYS.cat, data.categories);
   }
+  // migration: categories saved before fixed colors existed have no `color` -- assign one from
+  // CAT_PALETTE by array position, once, so nothing visibly reshuffles on upgrade (this is the
+  // one-time equivalent of the 總結 donut's old rank-based coloring, just made permanent per id).
+  (function(){
+    var colorMigrated = false;
+    data.categories.forEach(function(c, i){
+      if (!c.color){ c.color = CAT_PALETTE[i % CAT_PALETTE.length]; colorMigrated = true; }
+    });
+    if (colorMigrated) saveArr(KEYS.cat, data.categories);
+  })();
 
   // migration/normalization: recurring defs saved before startDate existed have no lower bound --
   // default to a sentinel far enough in the past that pre-existing defs keep behaving exactly like
@@ -689,9 +728,6 @@
     if (unit === 'quarter') return s.getFullYear()+' Q'+(Math.floor(s.getMonth()/3)+1);
     return ''+s.getFullYear();
   }
-  // rank-based, not a fixed per-category color (categories have no color field) -- a category's
-  // dot can shift between periods if its rank among that period's categories changes.
-  var CAT_PALETTE = ['#a3402c','#c9932f','#5c8a3f','#2f7a9e','#3d5c96','#6b4f96','#b0507a','#7d715c'];
   function getSummaryBreakdown(unit, anchor, type){
     var start = periodStart(unit, anchor), end = periodEnd(unit, anchor);
     var totals = {}, total = 0;
@@ -755,6 +791,7 @@
   function catById(id){ return data.categories.find(function(c){ return c.id === id; }); }
   function catIcon(id){ var c = catById(id); return c ? c.icon : '❔'; }
   function catName(id){ var c = catById(id); return c ? c.name : '未分類'; }
+  function catColor(id){ var c = catById(id); return (c && c.color) ? c.color : '#7d715c'; } // #7d715c = --ink-soft, for 未分類/deleted categories
 
   /* ================= app state ================= */
   var state = {
@@ -893,11 +930,21 @@
     var ringPct = list.length ? 1 : 0; // simple: full ring once anything logged today
     var ringStyle = 'background:conic-gradient(var(--income) 0turn '+ringPct+'turn, var(--rule-strong) 0turn 1turn)';
     var h = '<div class="app-header">';
+    // search button + nav-row share one flex row (align-items:center) so they're pixel-aligned
+    // against each other automatically -- 使用者反映「搜尋圖示沒有對齊」when this was previously
+    // position:absolute with a guessed top offset (off by ~2.5px against nav-row's real center,
+    // since nav-row's height is set by the two-line date-block, not the 32px round buttons
+    // themselves). the trailing spacer is the same width as the search button so nav-row's own
+    // justify-content:center still lands the date-block in the true horizontal center.
+    h += '<div class="header-top-row">';
+    h += '<button class="round-btn" data-action="openSearch" title="搜尋">🔍</button>';
     h += '<div class="nav-row">';
     h += '<button class="round-btn" data-action="prevDay">‹</button>';
     h += '<div class="date-block"><div class="date-main" data-action="openDateNav" title="點選跳到指定日期">'+state.view+(isToday?' <span class="ring" style="'+ringStyle+'" title="今天已記 '+list.length+' 筆"></span>':'')+'</div>';
     h += '<div class="date-sub">'+weekdayLabel(state.view)+(isToday?'　今天':'　回顧（可編輯）')+'</div></div>';
     h += '<button class="round-btn" data-action="nextDay" '+(isToday?'disabled':'')+'>›</button>';
+    h += '</div>';
+    h += '<span class="header-top-spacer"></span>';
     h += '</div>';
     if (!isToday){ h += '<button class="back-today" data-action="goToday">回到今天</button>'; }
     h += '<button class="header-add-btn" data-action="openAdd">＋ 記一筆</button>';
@@ -966,9 +1013,12 @@
       return h;
     }
 
+    // colors are now each category's own fixed .color (was rank-based CAT_PALETTE cycling before
+    // 分類固定顏色 -- a category no longer changes color between periods just because its rank
+    // among that period's categories changed).
     var stops = [], acc = 0;
-    bd.rows.forEach(function(r, i){
-      var color = CAT_PALETTE[i % CAT_PALETTE.length];
+    bd.rows.forEach(function(r){
+      var color = catColor(r.categoryId);
       var next = acc + r.pct;
       stops.push(color+' '+acc.toFixed(2)+'% '+next.toFixed(2)+'%');
       acc = next;
@@ -976,15 +1026,15 @@
     h += '<div class="donut-legend">';
     h += '<div class="donut" style="background:conic-gradient('+stops.join(', ')+');"><div class="donut-center"><span class="amt">'+fmtAmt(bd.total)+'</span><span class="lbl">'+(sm.type==='expense'?'支出':'收入')+'</span></div></div>';
     h += '<div class="legend">';
-    bd.rows.forEach(function(r, i){
-      h += '<div class="legend-item"><span class="dot" style="background:'+CAT_PALETTE[i % CAT_PALETTE.length]+';"></span>'+catIcon(r.categoryId)+' '+escapeHtml(catName(r.categoryId))+'</div>';
+    bd.rows.forEach(function(r){
+      h += '<div class="legend-item"><span class="dot" style="background:'+catColor(r.categoryId)+';"></span>'+catIcon(r.categoryId)+' '+escapeHtml(catName(r.categoryId))+'</div>';
     });
     h += '</div></div>';
 
     h += '<div class="row-list">';
-    bd.rows.forEach(function(r, i){
+    bd.rows.forEach(function(r){
       h += '<div class="cat-row">';
-      h += '<span class="dot" style="background:'+CAT_PALETTE[i % CAT_PALETTE.length]+';"></span>';
+      h += '<span class="dot" style="background:'+catColor(r.categoryId)+';"></span>';
       h += '<div class="cat-ic">'+catIcon(r.categoryId)+'</div>';
       h += '<div class="cat-mid"><div class="cat-name"><span>'+escapeHtml(catName(r.categoryId))+'</span><span class="pct">'+r.pct.toFixed(1)+'%</span></div></div>';
       h += '<div class="amt '+sm.type+'">'+fmtAmt(r.amount)+'</div>';
@@ -1312,6 +1362,7 @@
       h += '<div class="cat-mgmt-row" data-idx="'+idx+'">';
       h += '<span class="drag-handle">⠿</span>';
       h += '<button class="icon-pick-btn small" data-action="openCatIconPicker" data-idx="'+idx+'">'+c.icon+'</button>';
+      h += '<button class="color-pick-btn small" data-action="openCatColorPicker" data-idx="'+idx+'" style="background:'+(c.color||CAT_PALETTE[0])+';"></button>';
       h += '<input class="name-input" data-action="catName" data-idx="'+idx+'" value="'+escapeHtml(c.name)+'">';
       h += '<button class="icon-btn" data-action="catDelete" data-idx="'+idx+'">🗑</button>';
       h += '</div>';
@@ -1327,6 +1378,7 @@
     if (s.kind === 'preview') return renderPreviewSheet(s);
     if (s.kind === 'calendar') return renderCalendarSheet(s);
     if (s.kind === 'settingsFloat') return renderSettingsFloatSheet(s);
+    if (s.kind === 'search') return renderSearchSheet(s);
     return renderFormSheet(s);
   }
 
@@ -1336,6 +1388,7 @@
     if (s.kind === 'calendar') return renderCalendarSheet(s);
     if (s.kind === 'newCategory') return renderNewCategorySheet(s);
     if (s.kind === 'iconPicker') return renderIconPickerSheet(s);
+    if (s.kind === 'colorPicker') return renderColorPickerSheet(s);
     if (s.kind === 'alertDialog') return renderAlertDialogSheet(s);
     if (s.kind === 'syncConflict') return renderSyncConflictSheet();
     if (s.kind === 'linkOverwriteChoice') return renderLinkOverwriteChoiceSheet(s);
@@ -1385,6 +1438,22 @@
     return h;
   }
 
+  // 分類管理: standalone color grid for changing an EXISTING category's fixed color -- same
+  // CAT_PALETTE swatches as the new-category dialog's inline grid, same pairing with the icon
+  // picker above (no name field, only the one thing being changed here).
+  function renderColorPickerSheet(s){
+    var current = data.categories[s.catIdx] ? data.categories[s.catIdx].color : '';
+    var h = '<div class="backdrop center-modal" data-action="closeColorPicker">';
+    h += '<div class="sheet center-modal" data-stop="1" style="max-height:60vh;"><div class="handle"></div>';
+    h += '<div class="sheet-head"><h3>選擇顏色</h3><button class="x" data-action="closeColorPicker">✕</button></div>';
+    h += '<div class="color-grid">';
+    CAT_PALETTE.forEach(function(col){
+      h += '<button class="'+(col===current?'sel':'')+'" data-action="pickCatColor" data-color="'+col+'" style="background:'+col+';"></button>';
+    });
+    h += '</div></div></div>';
+    return h;
+  }
+
   // small focused dialog (unlike the full-height 記一筆 form) -- always centered regardless of
   // viewport, rather than bottom-anchored on mobile, since there's not enough content here for a
   // sliding sheet to earn its keep. Replaces the old window.prompt() so it matches the app's look.
@@ -1398,12 +1467,20 @@
     h += '</div>';
     h += '<div class="new-cat-row">';
     h += '<button class="icon-pick-btn'+(s.iconPickerOpen?' open':'')+'" data-action="toggleIconPicker">'+s.icon+'</button>';
+    h += '<button class="color-pick-btn" data-action="toggleColorPicker" style="background:'+s.color+';"></button>';
     h += '<input class="name-input" data-action="newCatSheetInput" data-field="name" placeholder="分類名稱" value="'+escapeHtml(s.name)+'">';
     h += '</div>';
     if (s.iconPickerOpen){
       h += '<div class="icon-grid">';
       ICON_CHOICES.forEach(function(ic){
         h += '<button class="'+(ic===s.icon?'sel':'')+'" data-action="pickIcon" data-icon="'+ic+'">'+ic+'</button>';
+      });
+      h += '</div>';
+    }
+    if (s.colorPickerOpen){
+      h += '<div class="color-grid">';
+      CAT_PALETTE.forEach(function(col){
+        h += '<button class="'+(col===s.color?'sel':'')+'" data-action="pickColor" data-color="'+col+'" style="background:'+col+';"></button>';
       });
       h += '</div>';
     }
@@ -1488,6 +1565,45 @@
       }
     }
     h += '</div></div></div>';
+    return h;
+  }
+
+  function renderSearchSheet(s){
+    var q = (s.query||'').trim().toLowerCase();
+    var results = [];
+    if (q){
+      results = data.transactions.filter(function(t){
+        var noteMatch = (t.note||'').toLowerCase().indexOf(q) > -1;
+        var catMatch = catName(t.categoryId).toLowerCase().indexOf(q) > -1;
+        return noteMatch || catMatch;
+      }).sort(function(a,b){ return a.date < b.date ? 1 : (a.date > b.date ? -1 : 0); });
+    }
+    // only play the slide-down entrance animation on the sheet's FIRST draw (when it opens) --
+    // every render() rebuilds this element from scratch, so without this guard the animation
+    // would replay on every single re-render, including the debounced ones while typing (使用者
+    // 原話「不要讓他閃更好」). s.animated flips permanently true right after the first draw.
+    var enterClass = s.animated ? '' : ' search-enter';
+    s.animated = true;
+    var h = '<div class="backdrop search-modal" data-action="closeSheetBackdrop">';
+    h += '<div class="sheet search-modal'+enterClass+'" data-stop="1">';
+    h += '<div class="sheet-head"><h3>搜尋</h3><button class="x" data-action="closeSheet">✕</button></div>';
+    h += '<input class="note-input" data-action="searchInput" placeholder="搜尋備註或分類" value="'+escapeHtml(s.query||'')+'">';
+    if (!q){
+      h += '<div class="empty-note">輸入關鍵字搜尋帳目備註或分類</div>';
+    } else if (!results.length){
+      h += '<div class="empty-note">沒有符合的帳目</div>';
+    } else {
+      h += '<div class="row-list">';
+      results.forEach(function(t){
+        h += '<div class="row-content" data-action="searchResultTap" data-id="'+t.id+'" style="cursor:pointer;">';
+        h += '<div class="cat">'+catIcon(t.categoryId)+'</div>';
+        h += '<div class="title">'+t.date+'　'+escapeHtml(t.note || catName(t.categoryId))+'</div>';
+        h += '<div class="amt '+t.type+'">'+(t.type==='expense'?'-':'+')+fmtAmt(t.amount)+'</div>';
+        h += '</div>';
+      });
+      h += '</div>';
+    }
+    h += '</div></div>';
     return h;
   }
 
@@ -1598,6 +1714,15 @@
 
       case 'openAdd': openAddSheet({date: state.view}); break;
       case 'openPreview': state.sheet = { kind:'preview', txId: el.getAttribute('data-id') }; render(); break;
+      case 'openSearch': state.sheet = { kind:'search', query:'', animated:false }; render(); break;
+      case 'searchResultTap': {
+        var searchTxId = el.getAttribute('data-id');
+        var searchTx = data.transactions.find(function(t){ return t.id === searchTxId; });
+        state.sheet = searchTx ? { kind:'preview', txId: searchTxId } : null;
+        if (searchTx) state.view = searchTx.date;
+        render();
+        break;
+      }
       case 'closeSheet': state.sheet = null; render(); break;
       case 'closeSheetBackdrop': if (e.target === el) { state.sheet = null; render(); } break;
 
@@ -1660,11 +1785,11 @@
       // even a state.sheet) -- applyToFormCategory tells saveNewCategory whether there's a chip
       // to auto-select back on the (possibly nonexistent) parent form.
       case 'quickAddCategory':
-        state.subSheet = { kind:'newCategory', icon:'🏷️', name:'', type:s.type, iconPickerOpen:false, applyToFormCategory:true };
+        state.subSheet = { kind:'newCategory', icon:'🏷️', color:CAT_PALETTE[0], name:'', type:s.type, iconPickerOpen:false, colorPickerOpen:false, applyToFormCategory:true };
         render();
         break;
       case 'openNewCategoryFromSettings':
-        state.subSheet = { kind:'newCategory', icon:'🏷️', name:'', type:'expense', iconPickerOpen:false, applyToFormCategory:false };
+        state.subSheet = { kind:'newCategory', icon:'🏷️', color:CAT_PALETTE[0], name:'', type:'expense', iconPickerOpen:false, colorPickerOpen:false, applyToFormCategory:false };
         render();
         break;
       case 'closeNewCategory':
@@ -1685,6 +1810,7 @@
         break;
       case 'toggleIconPicker':
         state.subSheet.iconPickerOpen = !state.subSheet.iconPickerOpen;
+        state.subSheet.colorPickerOpen = false;
         render();
         break;
       case 'pickIcon':
@@ -1692,10 +1818,20 @@
         state.subSheet.iconPickerOpen = false;
         render();
         break;
+      case 'toggleColorPicker':
+        state.subSheet.colorPickerOpen = !state.subSheet.colorPickerOpen;
+        state.subSheet.iconPickerOpen = false;
+        render();
+        break;
+      case 'pickColor':
+        state.subSheet.color = el.getAttribute('data-color');
+        state.subSheet.colorPickerOpen = false;
+        render();
+        break;
       case 'saveNewCategory': {
         var nm = (state.subSheet.name || '').trim();
         if (!nm){ showAlert('請輸入分類名稱'); break; }
-        var newCat = { id: uid(), name: nm, icon: state.subSheet.icon || '🏷️', type: state.subSheet.type };
+        var newCat = { id: uid(), name: nm, icon: state.subSheet.icon || '🏷️', color: state.subSheet.color || CAT_PALETTE[0], type: state.subSheet.type };
         data.categories.push(newCat);
         persist();
         if (state.subSheet.applyToFormCategory && state.sheet && state.sheet.type === newCat.type){
@@ -1717,6 +1853,21 @@
         break;
       case 'pickCatIcon':
         data.categories[state.subSheet.catIdx].icon = el.getAttribute('data-icon');
+        persist();
+        state.subSheet = null;
+        render();
+        break;
+
+      // 分類管理: change an EXISTING category's fixed color -- same pairing as the icon picker above.
+      case 'openCatColorPicker':
+        state.subSheet = { kind:'colorPicker', catIdx: parseInt(el.getAttribute('data-idx'),10) };
+        render();
+        break;
+      case 'closeColorPicker':
+        if (e.target === el){ state.subSheet = null; render(); }
+        break;
+      case 'pickCatColor':
+        data.categories[state.subSheet.catIdx].color = el.getAttribute('data-color');
         persist();
         state.subSheet = null;
         render();
@@ -2079,6 +2230,7 @@
     }
   }, false);
 
+  var searchDebounceTimer = null;
   document.addEventListener('input', function(e){
     if (e.target.matches('[data-action="setSheetNote"]')){
       state.sheet.note = e.target.value;
@@ -2097,6 +2249,37 @@
       state.subSheet[e.target.getAttribute('data-field')] = e.target.value;
     } else if (e.target.matches('[data-action="linkTokenInput"]')){
       state.linkTokenDraft = e.target.value;
+    } else if (e.target.matches('[data-action="searchInput"]')){
+      // debounced -- re-rendering on every single keystroke rebuilds the whole sheet (this app's
+      // render() always fully rebuilds), which was visibly flashing while typing (使用者原話「每
+      // 輸入一個字元就會閃一下 不要讓他閃更好」). state.sheet.query updates immediately (cheap),
+      // but the actual re-render (results list + the DOM rebuild that goes with it) waits until
+      // typing pauses. The input itself is untouched between keystrokes during the debounce
+      // window, so focus/cursor position naturally survive without needing to be restored --
+      // only the eventual debounced render() (once the user pauses) rebuilds the input, so that's
+      // the only point focus needs restoring.
+      state.sheet.query = e.target.value;
+      clearTimeout(searchDebounceTimer);
+      if (e.isComposing){
+        // IME composition in progress (e.g. 注音/拼音選字選到一半) -- do NOT schedule a render.
+        // render() rebuilds the input as a brand new DOM node, and destroying the element mid-
+        // composition breaks the IME's candidate session, dumping the unfinished raw symbols
+        // straight into the field instead of letting the user finish picking a character (使用者
+        // 原話「我注音輸入還沒輸入完他就自動把注音放到搜尋欄上了」). The native input already
+        // shows the in-progress composition on its own without any help from render() -- once the
+        // user actually picks a character, the browser fires one more (non-composing) input event
+        // that falls through to the normal debounced path below.
+        return;
+      }
+      var searchSelStart = e.target.selectionStart, searchSelEnd = e.target.selectionEnd;
+      searchDebounceTimer = setTimeout(function(){
+        render();
+        var newSearchInput = document.querySelector('[data-action="searchInput"]');
+        if (newSearchInput){
+          newSearchInput.focus();
+          newSearchInput.setSelectionRange(searchSelStart, searchSelEnd);
+        }
+      }, 200);
     }
   }, true);
 
