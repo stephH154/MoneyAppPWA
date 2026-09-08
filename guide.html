@@ -109,6 +109,7 @@
       <li><a href="#recurring">固定收支</a></li>
       <li><a href="#summary">總結</a></li>
       <li><a href="#sync">雲端同步</a></li>
+      <li><a href="#currency">幣別設定</a></li>
       <li><a href="#backup">備份 / 清除資料</a></li>
       <li><a href="#pwa">安裝成 App（PWA）</a></li>
       <li><a href="#limits">已知限制</a></li>
@@ -215,8 +216,14 @@
     <p>連結之後，<strong>之後每次改動都會自動同步</strong>，不用手動按「立即同步」（改動後幾秒內自動推送；「立即同步」按鈕還在，可以手動立刻觸發，按下去會轉圈圈提示正在處理）。如果兩台裝置各自都有新變更，會跳出跟連結時一樣的三選一（本機／雲端／合併）。</p>
   </section>
 
+  <section id="currency">
+    <h2><span class="num">08</span> 幣別設定</h2>
+    <p>設定頁「幣別設定」可以選台幣（NT$，小數 0 位）、美金（US$，小數 2 位），或自訂符號跟小數位數。<strong>只影響畫面上怎麼顯示，不會換算已經記錄的金額數字</strong>——切換幣別不會把 100 元變成 100 美元，只是符號跟小數位數的顯示規則改變。</p>
+    <p class="muted">小數位數也會影響記一筆的數字鍵盤：設成 0 位時，鍵盤上的「.」按鈕會變灰不能按，避免打了小數點卻不會顯示出來的落差。</p>
+  </section>
+
   <section id="backup">
-    <h2><span class="num">08</span> 備份 / 清除資料</h2>
+    <h2><span class="num">09</span> 備份 / 清除資料</h2>
     <ul>
       <li><strong>匯出備份</strong>：下載一份完整 JSON（帳目、固定收支、分類都包含），當手動備份用。</li>
       <li><strong>匯入備份</strong>：讀一個 JSON 檔案整包覆蓋現有資料，匯入前會跳確認。</li>
@@ -225,7 +232,7 @@
   </section>
 
   <section id="pwa">
-    <h2><span class="num">09</span> 安裝成 App（PWA）</h2>
+    <h2><span class="num">10</span> 安裝成 App（PWA）</h2>
     <p>透過已經部署上線的網址開啟時（不是直接開本機這份 html 檔案），可以把小帳本「安裝」成一個獨立的 App 圖示，離線時也能開起外殼（資料本身在 localStorage，跟安不安裝無關）。</p>
     <div class="dual">
       <div class="dual-col">
@@ -240,7 +247,7 @@
   </section>
 
   <section id="limits">
-    <h2><span class="num">10</span> 已知限制</h2>
+    <h2><span class="num">11</span> 已知限制</h2>
     <div class="limits">
       <div class="limit-item"><span class="mark">·</span>資料存在瀏覽器 <code>localStorage</code>，換瀏覽器或換裝置不會自動有資料，要靠雲端同步或手動匯出/匯入搬過去。</div>
       <div class="limit-item"><span class="mark">·</span>雲端同步不是即時雙向同步，是「改動後自動推送 + 切回畫面時檢查」，兩邊真的同時改到才需要手動選一份（或合併）。</div>
