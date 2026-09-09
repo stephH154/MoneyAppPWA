@@ -176,7 +176,6 @@
     background:var(--card);border:1px solid var(--rule);border-radius:14px;margin-bottom:10px;font-size:13px;color:var(--ink);
   }
   .settings-menu-btn .ic{font-size:16px;}
-  .settings-menu-btn.currency-sel{border-color:var(--accent);background:var(--income-bg);font-weight:600;}
   .settings-back{font-size:11.5px;color:var(--accent);border:none;background:none;padding:6px 0;margin-bottom:6px;}
   .settings-title{font-family:'Fraunces',serif;font-weight:700;font-size:16px;margin:2px 0 12px;}
   .form-field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;}
@@ -250,9 +249,14 @@
   .type-toggle button.on.expense{background:var(--expense-bg);color:var(--expense);border-color:var(--expense);}
   .type-toggle button.on.income{background:var(--income-bg);color:var(--income);border-color:var(--income);}
 
-  .amount-display{text-align:center;padding:4px 0;}
-  .amount-display .cur{font-size:12px;color:var(--ink-soft);}
-  .amount-display .num{font-family:'Fraunces',serif;font-size:36px;font-weight:700;font-variant-numeric:tabular-nums;}
+  /* grid (not flex) so the number stays perfectly centered in the WHOLE box regardless of how wide
+     the currency chip renders (its text length varies by currency code) -- the two outer 1fr
+     tracks are always equal width to each other no matter what's in them, so an empty 3rd track
+     silently balances the chip sitting in the 1st, without needing a matching dummy spacer element
+     (same principle as the header's search-button/spacer trick, just via grid instead of flex). */
+  .amount-display{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:4px 0;}
+  .amount-display .cur-pick{justify-self:start;}
+  .amount-display .num{font-family:'Fraunces',serif;font-size:36px;font-weight:700;font-variant-numeric:tabular-nums;justify-self:center;}
 
   .keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;}
   .keypad button{
@@ -273,6 +277,20 @@
     display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink);
     border:1px solid var(--rule-strong);border-radius:999px;padding:7px 13px;background:var(--paper);
   }
+  /* 記一筆/總結 的幣別選擇 chip -- tap 展開下面的清單，跟新增分類的圖示/顏色 toggle picker
+     (icon-pick-btn/color-pick-btn) 同一套慣例，只是清單用垂直排列的按鈕而不是格狀。 */
+  .cur-pick{
+    display:inline-flex;align-items:center;gap:3px;font-size:12px;color:var(--ink-soft);
+    border:1px solid var(--rule-strong);border-radius:999px;padding:4px 11px;background:var(--paper);
+  }
+  .cur-picker-drop{
+    display:flex;flex-direction:column;gap:4px;background:var(--paper);border:1px solid var(--rule);
+    border-radius:12px;padding:6px;margin:-4px 0 4px;
+  }
+  .cur-picker-drop .opt{font-size:12px;text-align:left;padding:7px 10px;border-radius:8px;border:none;background:none;color:var(--ink);}
+  .cur-picker-drop .opt.sel{background:var(--income-bg);font-weight:600;}
+  /* 幣別設定清單裡標記主幣別那一列，取代非主幣別列才有的 ☆/🗑 兩顆 icon-btn。 */
+  .base-tag{font-size:9px;font-weight:700;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:2px 8px;flex:none;}
   .note-input{
     font-size:13px;border:1px solid var(--rule-strong);border-radius:10px;padding:9px 11px;
     background:var(--paper);color:var(--ink);width:100%;
@@ -442,33 +460,68 @@
 
   // 每次真的要上版部署時把這個號碼加一（跟 sw.js 裡同名常數各自維護，建議一起 bump）。
   // 純粹拿來顯示在「設定」頁面最下面，方便確認目前跑的是不是最新版本。
-  var APP_VERSION = 'v1.8.0';
+  var APP_VERSION = 'v1.9.0';
 
   // 貼上你自己部署的 Apps Script /exec 網址（見 ledger-cloud-sync-apps-script.txt）。
   // 留空的話「雲端同步」設定頁會顯示「還沒設定」，其餘功能不受影響。
   var CLOUD_SYNC_URL = 'https://script.google.com/macros/s/AKfycbzTWITwyBR1WrMR5fJhmcj298j1OITGD-7ZzO-oo-4ysG9_AUQ3g85ZMYaxaWUtTtOU/exec';
 
   /* ================= storage ================= */
-  var KEYS = { tx:'xzb_transactions', rec:'xzb_recurring', skip:'xzb_skip', cat:'xzb_categories' };
+  var KEYS = { tx:'xzb_transactions', rec:'xzb_recurring', skip:'xzb_skip', cat:'xzb_categories', cur:'xzb_currencies' };
   var ONBOARDED_KEY = 'xzb_onboarded';
-  var CURRENCY_KEY = 'xzb_currency';
+  var LEGACY_CURRENCY_KEY = 'xzb_currency'; // pre-v1.9.0 single-currency-display setting -- read once during migration, then discarded
+  var BASE_CUR_KEY = 'xzb_base_currency_id';
 
   /* ================= currency ================= */
-  // 幣別設定只影響「顯示」——符號跟小數位數怎麼格式化，不做任何匯率換算，已經記錄的金額數字
-  // 本身完全不變。CURRENCY_PRESETS 是內建兩組常用選項，使用者也可以切成「自訂」自己填符號/位數。
-  var CURRENCY_PRESETS = [
-    { id:'twd', label:'台幣', symbol:'NT$', decimals:0 },
-    { id:'usd', label:'美金', symbol:'US$', decimals:2 }
+  // 完整多幣別系統：data.currencies 是使用者可以新增/編輯/刪除的幣別清單，每個帶自己的匯率
+  // （定義成「1 單位這個幣別＝多少單位主幣別」，主幣別自己的匯率永遠鎖定 1）；data.baseCurrencyId
+  // 指向目前的主幣別。每一筆帳目/固定收支都記著自己是用哪個幣別記的（currencyId）——記錄當下就
+  // 固定住，之後主幣別匯率再怎麼變也不會回頭改寫這筆的原始金額。主頁/總結畫面則一律把每筆換算成
+  // 主幣別（或總結自選的幣別）現算顯示，不快取——沿用本月結餘「不快取，每次現算」的既有原則。
+  // DEFAULT_CURRENCIES 的匯率是 2026-09-08 抓的即時中間價（以 TWD 為基準），只當一次性起始種子，
+  // 之後完全由使用者自己在幣別設定裡調整，不會再自動連網更新。
+  // active: false 讓一個幣別「存在但先不出現在記一筆/總結的選單裡」——跟固定收支 def.active
+  // 同一個欄位命名慣例，不另外發明新名字。主幣別永遠強制 active（見 rebaseCurrencies 呼叫端），
+  // 不然主頁換算基準本身卻選不到自己會很怪。
+  var DEFAULT_CURRENCIES = [
+    { id:'cur_twd', code:'TWD', label:'台幣',     symbol:'NT$', decimals:0, rate:1, active:true },
+    { id:'cur_usd', code:'USD', label:'美元',     symbol:'US$', decimals:2, rate:31.526, active:true },
+    { id:'cur_eur', code:'EUR', label:'歐元',     symbol:'€',   decimals:2, rate:36.639, active:true },
+    { id:'cur_jpy', code:'JPY', label:'日圓',     symbol:'¥',   decimals:0, rate:0.2020, active:true },
+    { id:'cur_gbp', code:'GBP', label:'英鎊',     symbol:'£',   decimals:2, rate:43.4862, active:true },
+    { id:'cur_aud', code:'AUD', label:'澳元',     symbol:'A$',  decimals:2, rate:22.765, active:true },
+    { id:'cur_chf', code:'CHF', label:'瑞士法郎', symbol:'CHF', decimals:2, rate:39.299, active:true },
+    { id:'cur_cad', code:'CAD', label:'加幣',     symbol:'C$',  decimals:2, rate:22.83, active:true },
+    { id:'cur_cny', code:'CNY', label:'人民幣',   symbol:'¥',   decimals:2, rate:4.8948, active:true },
+    { id:'cur_hkd', code:'HKD', label:'港幣',     symbol:'HK$', decimals:2, rate:4.1031, active:true }
   ];
-  function loadCurrency(){
-    try {
-      var v = JSON.parse(localStorage.getItem(CURRENCY_KEY));
-      if (v && typeof v.symbol === 'string' && typeof v.decimals === 'number') return v;
-    } catch(e){}
-    return Object.assign({}, CURRENCY_PRESETS[0]);
+  function curById(id){ return data.currencies.find(function(c){ return c.id === id; }); }
+  function baseCurrency(){ return curById(data.baseCurrencyId) || data.currencies[0]; }
+  function convertAmt(amount, fromId, toId){
+    if (fromId === toId) return amount;
+    var from = curById(fromId), to = curById(toId);
+    if (!from || !to) return amount; // referenced currency no longer exists -- fail safe (show unconverted) rather than NaN/crash
+    return amount * from.rate / to.rate;
   }
-  function saveCurrency(){ localStorage.setItem(CURRENCY_KEY, JSON.stringify(currency)); }
-  var currency = loadCurrency();
+  // switching 主幣別: re-express every currency's rate relative to the NEW base, using the OLD
+  // rates (all still relative to the OLD base) -- oldRate(X)/oldRate(newBase) reuses the exact
+  // same cross-multiplication convertAmt does. Must run BEFORE the caller reassigns
+  // data.baseCurrencyId (reads data.currencies as still being OLD-base-relative).
+  function rebaseCurrencies(newBaseId){
+    var factor = curById(newBaseId).rate;
+    data.currencies.forEach(function(c){ c.rate = c.rate / factor; });
+    curById(newBaseId).rate = 1; // force exactly 1 -- factor/factor can drift by float epsilon
+  }
+  function saveBaseCurrencyId(){ localStorage.setItem(BASE_CUR_KEY, data.baseCurrencyId); }
+  // backfill for transactions/recurring defs that predate this field (pre-migration data, or a
+  // sync payload/import from a device that hasn't upgraded yet) -- defaults to whatever base
+  // currently is, matching how migration itself seeds these same records once at startup.
+  function ensureCurrencyIds(){
+    var changed = false;
+    data.transactions.forEach(function(t){ if (!t.currencyId){ t.currencyId = data.baseCurrencyId; changed = true; } });
+    data.recurring.forEach(function(def){ if (!def.currencyId){ def.currencyId = data.baseCurrencyId; changed = true; } });
+    return changed;
+  }
 
   function loadArr(key){
     try { var v = JSON.parse(localStorage.getItem(key)); return Array.isArray(v) ? v : []; }
@@ -497,11 +550,22 @@
     {id:'cat_bonus', name:'獎金', icon:'🎁', type:'income', color:CAT_PALETTE[4]}
   ];
 
+  // shared by 清除所有資料's three flows (see the 'clearAll'/'clearDataUnlinkFirst'/'clearDataAndSync'
+  // action cases) -- a fresh start resets currencies back to the real-rate defaults too, same as
+  // categories resetting to DEFAULT_CATEGORIES.
+  function resetAllData(){
+    data.transactions = []; data.recurring = []; data.skip = []; data.categories = DEFAULT_CATEGORIES.slice();
+    data.currencies = DEFAULT_CURRENCIES.map(function(c){ return Object.assign({}, c); });
+    data.baseCurrencyId = 'cur_twd';
+  }
+
   var data = {
     transactions: loadArr(KEYS.tx),
     recurring: loadArr(KEYS.rec),
     skip: loadArr(KEYS.skip),
-    categories: loadArr(KEYS.cat)
+    categories: loadArr(KEYS.cat),
+    currencies: loadArr(KEYS.cur),
+    baseCurrencyId: localStorage.getItem(BASE_CUR_KEY) || null
   };
   if (data.categories.length === 0){
     data.categories = DEFAULT_CATEGORIES.slice();
@@ -526,6 +590,44 @@
     });
     if (colorMigrated) saveArr(KEYS.cat, data.categories);
   })();
+
+  // migration: first time running the multi-currency system (v1.9.0+) -- seed the 10 real-rate
+  // defaults, and fold in whatever the OLD single-currency display setting (xzb_currency) was, so
+  // upgrading looks unchanged (same zero-visible-change principle every other migration here uses).
+  if (data.currencies.length === 0){
+    data.currencies = DEFAULT_CURRENCIES.map(function(c){ return Object.assign({}, c); });
+    data.baseCurrencyId = 'cur_twd';
+    var legacyCur = null;
+    try { legacyCur = JSON.parse(localStorage.getItem(LEGACY_CURRENCY_KEY)); } catch(e){}
+    if (legacyCur && typeof legacyCur.symbol === 'string'){
+      if (legacyCur.id === 'usd'){
+        rebaseCurrencies('cur_usd');
+        data.baseCurrencyId = 'cur_usd';
+      } else if (legacyCur.id === 'custom'){
+        // can't know what real-world currency the old custom symbol/decimals represented -- keep
+        // TWD as base (rate 1, so nothing rescales) but carry over its display so existing amounts
+        // still show exactly as before. The other 9 defaults' rates are TWD-anchored, so if the
+        // user's old custom currency wasn't actually TWD, they'll want to double-check those once.
+        var twd = curById('cur_twd');
+        twd.symbol = legacyCur.symbol;
+        twd.decimals = legacyCur.decimals;
+      }
+      // legacyCur.id === 'twd' (or anything unrecognized): defaults already match, nothing to do
+    }
+    localStorage.removeItem(LEGACY_CURRENCY_KEY);
+    saveArr(KEYS.cur, data.currencies);
+    saveBaseCurrencyId();
+  }
+  if (!data.baseCurrencyId || !curById(data.baseCurrencyId)) data.baseCurrencyId = data.currencies[0].id;
+  if (ensureCurrencyIds()){ saveArr(KEYS.tx, data.transactions); saveArr(KEYS.rec, data.recurring); }
+  // migration: currencies saved before 啟用/active existed default to true (least-friction --
+  // a currency someone already configured was presumably meant to be usable).
+  (function(){
+    var activeMigrated = false;
+    data.currencies.forEach(function(c){ if (typeof c.active !== 'boolean'){ c.active = true; activeMigrated = true; } });
+    if (activeMigrated) saveArr(KEYS.cur, data.currencies);
+  })();
+  curById(data.baseCurrencyId).active = true; // 主幣別永遠是可選狀態，不受停用影響
 
   // migration/normalization: recurring defs saved before startDate existed have no lower bound --
   // default to a sentinel far enough in the past that pre-existing defs keep behaving exactly like
@@ -562,24 +664,32 @@
     saveArr(KEYS.rec, data.recurring);
     saveArr(KEYS.skip, data.skip);
     saveArr(KEYS.cat, data.categories);
+    saveArr(KEYS.cur, data.currencies);
+    saveBaseCurrencyId();
     syncMeta.lastLocalChangeTime = Date.now();
     saveSyncMeta();
     scheduleAutoSync();
   }
 
   function getSyncPayload(){
-    return { transactions:data.transactions, recurring:data.recurring, skip:data.skip, categories:data.categories };
+    return { transactions:data.transactions, recurring:data.recurring, skip:data.skip, categories:data.categories,
+      currencies:data.currencies, baseCurrencyId:data.baseCurrencyId };
   }
   function applySyncPayload(obj){
     data.transactions = obj.transactions || [];
     data.recurring = obj.recurring || [];
     data.skip = obj.skip || [];
     data.categories = (obj.categories && obj.categories.length) ? obj.categories : DEFAULT_CATEGORIES.slice();
+    data.currencies = (obj.currencies && obj.currencies.length) ? obj.currencies : DEFAULT_CURRENCIES.map(function(c){ return Object.assign({}, c); });
+    data.baseCurrencyId = (obj.baseCurrencyId && curById(obj.baseCurrencyId)) ? obj.baseCurrencyId : data.currencies[0].id;
     ensureRecurringStartDates();
+    ensureCurrencyIds();
     saveArr(KEYS.tx, data.transactions);
     saveArr(KEYS.rec, data.recurring);
     saveArr(KEYS.skip, data.skip);
     saveArr(KEYS.cat, data.categories);
+    saveArr(KEYS.cur, data.currencies);
+    saveBaseCurrencyId();
   }
   // a freshly created remote file is literally '{}' -- no transactions key at all, not just an
   // empty array -- that's the signal "nobody has ever pushed to this token yet".
@@ -618,6 +728,8 @@
       transactions: mergeById(localPayload.transactions||[], remotePayload.transactions||[], 'updatedAt'),
       recurring: mergeById(localPayload.recurring||[], remotePayload.recurring||[], '__no_timestamp__'),
       categories: mergeById(localPayload.categories||[], remotePayload.categories||[], '__no_timestamp__'),
+      currencies: mergeById(localPayload.currencies||[], remotePayload.currencies||[], '__no_timestamp__'),
+      baseCurrencyId: localPayload.baseCurrencyId || remotePayload.baseCurrencyId,
       skip: Object.keys(mergedSkip).map(function(k){ return mergedSkip[k]; })
     };
   }
@@ -748,13 +860,14 @@
     if (unit === 'quarter') return s.getFullYear()+' Q'+(Math.floor(s.getMonth()/3)+1);
     return ''+s.getFullYear();
   }
-  function getSummaryBreakdown(unit, anchor, type){
+  function getSummaryBreakdown(unit, anchor, type, targetCurId){
     var start = periodStart(unit, anchor), end = periodEnd(unit, anchor);
     var totals = {}, total = 0;
     data.transactions.forEach(function(t){
       if (t.type !== type || t.date < start || t.date > end) return;
-      totals[t.categoryId] = (totals[t.categoryId]||0) + t.amount;
-      total += t.amount;
+      var amt = convertAmt(t.amount, t.currencyId||data.baseCurrencyId, targetCurId);
+      totals[t.categoryId] = (totals[t.categoryId]||0) + amt;
+      total += amt;
     });
     var rows = Object.keys(totals).map(function(cid){
       return { categoryId: cid === 'null' ? null : cid, amount: totals[cid], pct: total>0 ? totals[cid]/total*100 : 0 };
@@ -821,13 +934,14 @@
     subSheet: null, // popup layered ON TOP of state.sheet (calendar/新增分類), parent stays mounted
     settingsView: null,
     recurringDraft: null,
+    currencyEditDraft: null, // when non-null + settingsView==='currencyForm', creating/editing a currency in 幣別設定
     syncing: false, // true while 立即同步 has an in-flight request -- drives the spinner button state
     linking: false, // true while 連結雲端同步 has an in-flight request -- drives its spinner state
     resolving: false, // true while a syncConflict/linkOverwriteChoice button's request is in flight --
                        // disables every button in that dialog so a double-tap can't fire two
                        // resolutions (本機/雲端/合併) before either one's push/pull actually lands
     linkTokenDraft: null, // editable draft for the not-yet-linked token input; null = empty, no default
-    summary: { unit:'month', anchor: todayStr(), type:'expense' },
+    summary: { unit:'month', anchor: todayStr(), type:'expense', currencyId: data.baseCurrencyId, currencyPickerOpen:false },
     // null = not showing; a number = which slide is up. Only starts at 0 on a genuinely fresh
     // install (the ONBOARDED_KEY flag, not "no transactions yet" -- 清除所有資料 shouldn't force
     // it to replay).
@@ -848,15 +962,26 @@
     return data.transactions.filter(function(t){ return t.date === dateStr; })
       .sort(function(a,b){ return a.createdAt < b.createdAt ? -1 : 1; });
   }
+  // both totals convert each transaction's own currency into the BASE currency before summing --
+  // a mixed-currency day/month has no single meaningful total otherwise (使用者原話「主頁顯示主
+  // 幣別」). Current rates, computed live every call -- not cached, matching this function's own
+  // long-standing "本月結餘不做快取" principle.
   function dayTotals(list){
     var inc=0, exp=0;
-    list.forEach(function(t){ if (t.type==='income') inc+=t.amount; else exp+=t.amount; });
+    list.forEach(function(t){
+      var amt = convertAmt(t.amount, t.currencyId||data.baseCurrencyId, data.baseCurrencyId);
+      if (t.type==='income') inc+=amt; else exp+=amt;
+    });
     return { inc:inc, exp:exp, net:inc-exp };
   }
   function monthTotals(dateStr){
     var mk = monthKey(dateStr);
     var inc=0, exp=0;
-    data.transactions.forEach(function(t){ if (monthKey(t.date)!==mk) return; if (t.type==='income') inc+=t.amount; else exp+=t.amount; });
+    data.transactions.forEach(function(t){
+      if (monthKey(t.date)!==mk) return;
+      var amt = convertAmt(t.amount, t.currencyId||data.baseCurrencyId, data.baseCurrencyId);
+      if (t.type==='income') inc+=amt; else exp+=amt;
+    });
     return { inc:inc, exp:exp, net:inc-exp };
   }
   function streakDays(){
@@ -868,11 +993,18 @@
     while (hasEntry[cursor]){ count++; cursor = addDays(cursor, -1); }
     return count;
   }
-  function fmtAmt(n){
+  // curObj lets a caller format in a currency OTHER than the base (記一筆's own entry currency,
+  // 總結's user-picked currency) -- omitted, it defaults to base, which is what almost every
+  // existing call site wants (aggregates always display in base).
+  function fmtAmt(n, curObj){
+    var c = curObj || baseCurrency();
     var neg = n < 0; n = Math.abs(n);
-    var s = n.toLocaleString('en-US', { minimumFractionDigits:currency.decimals, maximumFractionDigits:currency.decimals });
+    var s = n.toLocaleString('en-US', { minimumFractionDigits:c.decimals, maximumFractionDigits:c.decimals });
     return (neg?'-':'') + s;
   }
+  // trims a rebased rate's float noise for display (e.g. 1/31.526 -> 0.0317...) without pinning it
+  // to a fixed decimal count the way fmtAmt does for an actual amount.
+  function fmtRate(n){ return String(Math.round(n*10000)/10000); }
 
   /* ================= render ================= */
   var root = document.getElementById('app');
@@ -994,6 +1126,7 @@
 
   function renderSummaryTab(){
     var sm = state.summary;
+    var summaryCur = curById(sm.currencyId) || baseCurrency();
     var start = periodStart(sm.unit, sm.anchor), end = periodEnd(sm.unit, sm.anchor);
     var label = periodLabel(sm.unit, start, end);
     var atCurrent = periodStart(sm.unit, sm.anchor) >= periodStart(sm.unit, todayStr());
@@ -1001,10 +1134,11 @@
     var incTotal = 0, expTotal = 0;
     data.transactions.forEach(function(t){
       if (t.date < start || t.date > end) return;
-      if (t.type === 'income') incTotal += t.amount; else expTotal += t.amount;
+      var amt = convertAmt(t.amount, t.currencyId||data.baseCurrencyId, summaryCur.id);
+      if (t.type === 'income') incTotal += amt; else expTotal += amt;
     });
 
-    var bd = getSummaryBreakdown(sm.unit, sm.anchor, sm.type);
+    var bd = getSummaryBreakdown(sm.unit, sm.anchor, sm.type, summaryCur.id);
 
     var h = '<div class="summary-tab">';
     h += '<div class="period-row">';
@@ -1013,13 +1147,23 @@
       h += '<button class="'+(sm.unit===u[0]?'on':'')+'" data-action="setSummaryUnit" data-unit="'+u[0]+'">'+u[1]+'</button>';
     });
     h += '</div>';
-    h += '<div class="period-nav"><button class="round-btn small" data-action="summaryPrev">‹</button><b>'+label+'</b><button class="round-btn small" data-action="summaryNext"'+(atCurrent?' disabled':'')+'>›</button></div>';
+    h += '<button type="button" class="cur-pick" data-action="toggleSummaryCurrencyPicker">💱 '+escapeHtml(summaryCur.code)+' ▾</button>';
     h += '</div>';
+    if (sm.currencyPickerOpen){
+      h += '<div class="cur-picker-drop">';
+      // active-only, except always keep the currently-selected one visible even if disabled since --
+      // same reasoning as the 記一筆 picker above.
+      data.currencies.filter(function(c){ return c.active || c.id === summaryCur.id; }).forEach(function(c){
+        h += '<button type="button" class="opt'+(c.id===summaryCur.id?' sel':'')+'" data-action="pickSummaryCurrency" data-id="'+c.id+'">'+escapeHtml(c.code)+' '+escapeHtml(c.label)+(c.id===data.baseCurrencyId?'（主幣別）':'')+'</button>';
+      });
+      h += '</div>';
+    }
+    h += '<div class="period-nav" style="margin-bottom:10px;"><button class="round-btn small" data-action="summaryPrev">‹</button><b>'+label+'</b><button class="round-btn small" data-action="summaryNext"'+(atCurrent?' disabled':'')+'>›</button></div>';
 
     h += '<div class="summary-strip">';
-    h += '<div class="cell"><span class="lbl">收入</span><span class="val" style="color:var(--income);">'+fmtAmt(incTotal)+'</span></div>';
-    h += '<div class="cell"><span class="lbl">支出</span><span class="val" style="color:var(--expense);">'+fmtAmt(expTotal)+'</span></div>';
-    h += '<div class="cell"><span class="lbl">淨額</span><span class="val">'+fmtAmt(incTotal-expTotal)+'</span></div>';
+    h += '<div class="cell"><span class="lbl">收入</span><span class="val" style="color:var(--income);">'+fmtAmt(incTotal, summaryCur)+'</span></div>';
+    h += '<div class="cell"><span class="lbl">支出</span><span class="val" style="color:var(--expense);">'+fmtAmt(expTotal, summaryCur)+'</span></div>';
+    h += '<div class="cell"><span class="lbl">淨額</span><span class="val">'+fmtAmt(incTotal-expTotal, summaryCur)+'</span></div>';
     h += '</div>';
 
     h += '<div class="type-toggle" style="margin-bottom:14px;">';
@@ -1044,7 +1188,7 @@
       acc = next;
     });
     h += '<div class="donut-legend">';
-    h += '<div class="donut" style="background:conic-gradient('+stops.join(', ')+');"><div class="donut-center"><span class="amt">'+fmtAmt(bd.total)+'</span><span class="lbl">'+(sm.type==='expense'?'支出':'收入')+'</span></div></div>';
+    h += '<div class="donut" style="background:conic-gradient('+stops.join(', ')+');"><div class="donut-center"><span class="amt">'+fmtAmt(bd.total, summaryCur)+'</span><span class="lbl">'+(sm.type==='expense'?'支出':'收入')+'</span></div></div>';
     h += '<div class="legend">';
     bd.rows.forEach(function(r){
       h += '<div class="legend-item"><span class="dot" style="background:'+catColor(r.categoryId)+';"></span>'+catIcon(r.categoryId)+' '+escapeHtml(catName(r.categoryId))+'</div>';
@@ -1057,7 +1201,7 @@
       h += '<span class="dot" style="background:'+catColor(r.categoryId)+';"></span>';
       h += '<div class="cat-ic">'+catIcon(r.categoryId)+'</div>';
       h += '<div class="cat-mid"><div class="cat-name"><span>'+escapeHtml(catName(r.categoryId))+'</span><span class="pct">'+r.pct.toFixed(1)+'%</span></div></div>';
-      h += '<div class="amt '+sm.type+'">'+fmtAmt(r.amount)+'</div>';
+      h += '<div class="amt '+sm.type+'">'+fmtAmt(r.amount, summaryCur)+'</div>';
       h += '</div>';
     });
     h += '</div></div>';
@@ -1080,7 +1224,7 @@
           h += '<div class="row-content">';
           h += '<div class="cat">'+catIcon(p.def.categoryId)+'</div>';
           h += '<div class="title">'+(p.overdue?'<span class="flag">逾期</span>　':'')+p.def.title+'</div>';
-          h += '<div class="amt '+p.def.type+'">'+(p.def.type==='expense'?'-':'+')+fmtAmt(p.def.amount)+'</div>';
+          h += '<div class="amt '+p.def.type+'">'+(p.def.type==='expense'?'-':'+')+fmtAmt(convertAmt(p.def.amount, p.def.currencyId||data.baseCurrencyId, data.baseCurrencyId))+'</div>';
           h += '</div>';
           h += '<div class="pending-actions">';
           h += '<button class="mini-btn" data-action="confirmRecurring" data-def="'+p.def.id+'" data-due="'+p.dueDate+'" data-period="'+p.period+'">確認</button>';
@@ -1107,7 +1251,7 @@
         h += '<div class="row-content" data-action="openPreview" data-id="'+t.id+'">';
         h += '<div class="cat">'+catIcon(t.categoryId)+'</div>';
         h += '<div class="title">'+escapeHtml(t.note || catName(t.categoryId))+'</div>';
-        h += '<div class="amt '+t.type+'">'+(t.type==='expense'?'-':'+')+fmtAmt(t.amount)+'</div>';
+        h += '<div class="amt '+t.type+'">'+(t.type==='expense'?'-':'+')+fmtAmt(convertAmt(t.amount, t.currencyId||data.baseCurrencyId, data.baseCurrencyId))+'</div>';
         h += '</div></div>';
       });
       h += '</div>';
@@ -1137,7 +1281,7 @@
   function renderMonthCard(extraClass){
     var mTotals = monthTotals(state.view);
     var h = '<div class="month-card '+(extraClass||'')+'"><div class="head"><span>本月收入 +'+fmtAmt(mTotals.inc)+'</span><span>本月支出 -'+fmtAmt(mTotals.exp)+'</span></div>';
-    h += '<div class="bal"><div class="lbl" style="font-size:9px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;">本月結餘</div><div class="num">'+escapeHtml(currency.symbol)+' '+fmtAmt(mTotals.net)+'</div></div>';
+    h += '<div class="bal"><div class="lbl" style="font-size:9px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;">本月結餘</div><div class="num">'+escapeHtml(baseCurrency().symbol)+' '+fmtAmt(mTotals.net)+'</div></div>';
     var streak = streakDays();
     if (streak > 0) h += '<div class="streak">🔥 連續記帳 '+streak+' 天</div>';
     h += '</div>';
@@ -1223,6 +1367,7 @@
     if (v === 'categories') return renderCategoriesList();
     if (v === 'cloudSync') return renderCloudSyncSettings();
     if (v === 'currency') return renderCurrencySettings();
+    if (v === 'currencyForm') return renderCurrencyForm();
     if (v === 'summary'){
       // desktop-only entry point (mobile reaches renderSummaryTab() directly via the 總結 tab,
       // where the app header already shows the "總結" title -- no back button needed there).
@@ -1267,21 +1412,56 @@
     return h;
   }
 
+  // 每一列重用 renderRecurringList 的 .def-row 樣式（icon slot + meta + trailing 按鈕），跟固定收支
+  // 清單同一套視覺語言，不另外發明一套。點列本身（星星/垃圾桶以外的地方）開編輯表單；主幣別那列
+  // 沒有星星/垃圾桶（不能刪除/設定自己當自己的主幣別），改用 .base-tag 標籤取代。
   function renderCurrencySettings(){
     var h = '<button class="settings-back" data-action="gotoSettings" data-view="">‹ 返回設定</button>';
     h += '<div class="settings-title">幣別設定</div>';
-    h += '<div class="empty-note" style="text-align:left;line-height:1.6;">幣別只影響畫面上顯示的符號跟小數位數，不會換算已經記錄的金額數字。</div>';
-    CURRENCY_PRESETS.forEach(function(p){
-      var sel = currency.id === p.id;
-      h += '<button class="settings-menu-btn'+(sel?' currency-sel':'')+'" data-action="pickCurrencyPreset" data-id="'+p.id+'">'+(sel?'✓ ':'')+p.label+'（'+p.symbol+'・小數'+p.decimals+'位）</button>';
+    h += '<div class="empty-note" style="text-align:left;line-height:1.6;">幣別只影響顯示跟總結怎麼換算，不會改變已經記錄的金額本身。切換主幣別後，其他幣別的匯率會自動換算。</div>';
+    data.currencies.forEach(function(c){
+      var isBase = c.id === data.baseCurrencyId;
+      h += '<div class="def-row'+(c.active?'':' inactive')+'" data-action="currencyRowTap" data-id="'+c.id+'">';
+      h += '<div class="cat" style="font-size:11px;font-weight:700;width:auto;">'+escapeHtml(c.code)+'</div>';
+      h += '<div class="meta"><div class="t1">'+escapeHtml(c.label)+'</div><div class="t2">'+escapeHtml(c.symbol)+'・小數'+c.decimals+'位'+(isBase?'':'・1 '+escapeHtml(c.code)+' = '+fmtRate(c.rate)+' '+escapeHtml(baseCurrency().code))+(c.active?'':'　（已停用）')+'</div></div>';
+      if (isBase){
+        h += '<span class="base-tag">主幣別</span>';
+      } else {
+        h += '<button class="icon-btn" data-action="setBaseCurrency" data-id="'+c.id+'" title="設為主幣別">☆</button>';
+        h += '<button class="icon-btn" data-action="deleteCurrency" data-id="'+c.id+'" title="刪除">🗑</button>';
+      }
+      h += '</div>';
     });
-    var isCustom = currency.id === 'custom';
-    h += '<button class="settings-menu-btn'+(isCustom?' currency-sel':'')+'" data-action="pickCurrencyCustom">'+(isCustom?'✓ ':'')+'自訂</button>';
-    if (isCustom){
-      h += '<div class="form-field"><label>符號</label><input class="name-input" maxlength="6" data-action="currencySymbolInput" value="'+escapeHtml(currency.symbol)+'"></div>';
-      h += '<div class="form-field"><label>小數位數</label><select data-action="currencyDecimalsInput">';
-      [0,1,2,3,4].forEach(function(d){ h += '<option value="'+d+'" '+(currency.decimals===d?'selected':'')+'>'+d+'</option>'; });
-      h += '</select></div>';
+    h += '<button class="btn primary" style="width:100%;margin-top:6px;" data-action="newCurrency">＋ 新增幣別</button>';
+    return h;
+  }
+
+  function renderCurrencyForm(){
+    var d = state.currencyEditDraft;
+    var isBase = !!(d.id && d.id === data.baseCurrencyId);
+    var h = '<button class="settings-back" data-action="gotoSettings" data-view="currency">‹ 返回幣別設定</button>';
+    h += '<div class="settings-title">'+(d.id?'編輯幣別':'新增幣別')+'</div>';
+    h += '<div class="form-field"><label>代碼</label><input maxlength="6" data-field="code" data-action="currencyDraftInput" value="'+escapeHtml(d.code)+'"></div>';
+    h += '<div class="form-field"><label>名稱</label><input data-field="label" data-action="currencyDraftInput" value="'+escapeHtml(d.label)+'"></div>';
+    h += '<div class="form-field"><label>符號</label><input maxlength="6" data-field="symbol" data-action="currencyDraftInput" value="'+escapeHtml(d.symbol)+'"></div>';
+    h += '<div class="form-field"><label>小數位數</label><select data-field="decimals" data-action="currencyDraftInput">';
+    [0,1,2,3,4].forEach(function(n){ h += '<option value="'+n+'" '+(d.decimals===n?'selected':'')+'>'+n+'</option>'; });
+    h += '</select></div>';
+    h += '<div class="form-field"><label>匯率（1 '+escapeHtml(d.code||'?')+' = ? '+escapeHtml(baseCurrency().code)+'）</label>';
+    if (isBase){
+      h += '<input value="1（主幣別，固定）" disabled>';
+      h += '<div class="empty-note" style="text-align:left;padding:6px 0 0;">🔒 主幣別的匯率永遠是 1，要換基準請回上一頁對別的幣別按☆「設為主幣別」。</div>';
+    } else {
+      h += '<input inputmode="decimal" data-field="rate" data-action="currencyDraftInput" value="'+escapeHtml(String(d.rate))+'">';
+    }
+    h += '</div>';
+    h += '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:12px;"><input type="checkbox" data-field="active" data-action="currencyDraftInput" '+(d.active?'checked':'')+(isBase?' disabled':'')+'> 啟用（記一筆／總結才能選到）</label>';
+    if (isBase){
+      h += '<div class="empty-note" style="text-align:left;margin:-8px 0 12px;">主幣別永遠是啟用狀態，改不了。</div>';
+    }
+    h += '<div class="form-actions"><button class="btn" data-action="gotoSettings" data-view="currency">取消</button><button class="btn primary" data-action="saveCurrencyDraft">儲存</button></div>';
+    if (d.id && !isBase){
+      h += '<button class="btn danger" style="width:100%;margin-top:8px;" data-action="deleteCurrency" data-id="'+d.id+'">🗑 刪除這個幣別</button>';
     }
     return h;
   }
@@ -1336,7 +1516,7 @@
       h += '<div class="def-row'+(def.active?'':' inactive')+'" data-action="editRecurring" data-id="'+def.id+'">';
       h += '<div class="cat">'+catIcon(def.categoryId)+'</div>';
       h += '<div class="meta"><div class="t1">'+escapeHtml(def.title)+'</div><div class="t2">'+freqLabel(def)+(def.active?'':'　（已停用）')+'</div></div>';
-      h += '<div class="amt '+def.type+'">'+(def.type==='expense'?'-':'+')+fmtAmt(def.amount)+'</div>';
+      h += '<div class="amt '+def.type+'">'+(def.type==='expense'?'-':'+')+fmtAmt(convertAmt(def.amount, def.currencyId||data.baseCurrencyId, data.baseCurrencyId))+'</div>';
       h += '<button class="icon-btn" data-action="deleteRecurring" data-id="'+def.id+'">🗑</button>';
       h += '</div>';
     });
@@ -1362,6 +1542,9 @@
     h += '<div class="form-field"><label>金額</label><input type="number" inputmode="decimal" data-field="amount" data-action="recDraftInput" value="'+d.amount+'"></div>';
     h += '<div class="form-field"><label>分類</label><select data-field="categoryId" data-action="recDraftInput">';
     data.categories.forEach(function(c){ h += '<option value="'+c.id+'" '+(c.id===d.categoryId?'selected':'')+'>'+c.icon+' '+escapeHtml(c.name)+'</option>'; });
+    h += '</select></div>';
+    h += '<div class="form-field"><label>幣別</label><select data-field="currencyId" data-action="recDraftInput">';
+    data.currencies.filter(function(c){ return c.active || c.id === d.currencyId; }).forEach(function(c){ h += '<option value="'+c.id+'" '+(c.id===d.currencyId?'selected':'')+'>'+escapeHtml(c.code)+' '+escapeHtml(c.label)+'</option>'; });
     h += '</select></div>';
     h += '<div class="form-field"><label>頻率</label><select data-field="frequency" data-action="recDraftInput">';
     ['monthly','weekly','daily'].forEach(function(f){
@@ -1543,6 +1726,7 @@
   }
 
   function renderFormSheet(s){
+    var entryCur = curById(s.currencyId) || baseCurrency();
     var h = '<div class="backdrop" data-action="closeSheetBackdrop">';
     h += '<div class="sheet" data-stop="1"><div class="handle"></div>';
     h += '<div class="sheet-head"><h3>'+(s.editingId?'編輯這筆':'記一筆')+'</h3><button class="x" data-action="closeSheet">✕</button></div>';
@@ -1550,10 +1734,26 @@
     h += '<button class="'+(s.type==='expense'?'on expense':'')+'" data-action="setSheet" data-field="type" data-value="expense">－ 支出</button>';
     h += '<button class="'+(s.type==='income'?'on income':'')+'" data-action="setSheet" data-field="type" data-value="income">＋ 收入</button>';
     h += '</div>';
-    h += '<div class="amount-display"><span class="cur">'+escapeHtml(currency.symbol)+'</span> <span class="num">'+(s.amountStr||'0')+'</span></div>';
+    // 使用者可以自己選這筆是用哪個幣別記的（不一定是主幣別）——tap-to-expand 跟新增分類的圖示/
+    // 顏色 toggle picker 是同一套慣例（toggleIconPicker/pickIcon）。小數位上限跟著「這筆選的幣別」
+    // 走，不是主幣別，所以鍵盤的「.」鍵 disabled 判斷要看 entryCur，不是 baseCurrency()。
+    h += '<div class="amount-display">';
+    h += '<button type="button" class="cur-pick" data-action="toggleCurrencyPicker">💱 '+escapeHtml(entryCur.code)+' ▾</button>';
+    h += '<span class="num">'+(s.amountStr||'0')+'</span>';
+    h += '</div>';
+    if (s.currencyPickerOpen){
+      h += '<div class="cur-picker-drop">';
+      // active-only, EXCEPT always keep the currently-selected currency visible even if it's since
+      // been disabled (e.g. editing an old entry recorded in a currency someone later turned off) --
+      // otherwise the picker would show nothing highlighted while the chip above clearly names one.
+      data.currencies.filter(function(c){ return c.active || c.id === entryCur.id; }).forEach(function(c){
+        h += '<button type="button" class="opt'+(c.id===entryCur.id?' sel':'')+'" data-action="pickSheetCurrency" data-id="'+c.id+'">'+escapeHtml(c.code)+' '+escapeHtml(c.label)+(c.id===data.baseCurrencyId?'（主幣別）':'')+'</button>';
+      });
+      h += '</div>';
+    }
     h += '<div class="keypad">';
     ['1','2','3','4','5','6','7','8','9','.','0','⌫'].forEach(function(k){
-      var dis = (k === '.' && currency.decimals <= 0) ? ' disabled' : '';
+      var dis = (k === '.' && entryCur.decimals <= 0) ? ' disabled' : '';
       h += '<button data-action="keypad" data-key="'+k+'"'+dis+'>'+k+'</button>';
     });
     h += '</div>';
@@ -1652,14 +1852,19 @@
   function renderPreviewSheet(s){
     var t = data.transactions.find(function(x){ return x.id === s.txId; });
     if (!t){ state.sheet = null; return ''; }
+    var txCur = curById(t.currencyId) || baseCurrency();
+    var baseCur = baseCurrency();
     var h = '<div class="backdrop center-modal" data-action="closeSheetBackdrop">';
     h += '<div class="sheet center-modal" data-stop="1"><div class="handle"></div>';
     h += '<div class="sheet-head"><h3>帳目明細</h3><button class="x" data-action="closeSheet">✕</button></div>';
     h += '<div class="preview-hero"><div class="cat">'+catIcon(t.categoryId)+'</div>';
     h += '<div class="name">'+escapeHtml(t.note || catName(t.categoryId))+'</div>';
-    h += '<div class="amt '+t.type+'">'+(t.type==='expense'?'-':'+')+escapeHtml(currency.symbol)+' '+fmtAmt(t.amount)+'</div></div>';
+    h += '<div class="amt '+t.type+'">'+(t.type==='expense'?'-':'+')+escapeHtml(baseCur.symbol)+' '+fmtAmt(convertAmt(t.amount, txCur.id, baseCur.id))+'</div></div>';
     h += '<div class="preview-list">';
     h += '<div class="pv-row"><span class="k">分類</span><span>'+catIcon(t.categoryId)+' '+escapeHtml(catName(t.categoryId))+'</span></div>';
+    if (txCur.id !== baseCur.id){
+      h += '<div class="pv-row"><span class="k">幣別</span><span>'+escapeHtml(txCur.code)+' '+escapeHtml(txCur.symbol)+' '+fmtAmt(t.amount, txCur)+'</span></div>';
+    }
     h += '<div class="pv-row"><span class="k">日期</span><span>'+t.date+'　'+weekdayLabel(t.date)+'</span></div>';
     h += '<div class="pv-row"><span class="k">備註</span><span>'+escapeHtml(t.note||'（無）')+'</span></div>';
     h += '<div class="pv-row"><span class="k">建立時間</span><span>'+new Date(t.createdAt).toLocaleString('zh-TW',{hour12:false})+'</span></div>';
@@ -1675,14 +1880,16 @@
     var firstOfType = data.categories.filter(function(c){ return c.type === defaultType; })[0];
     state.sheet = Object.assign({
       kind:'form', editingId:null, type:'expense', amountStr:'0', categoryId: firstOfType ? firstOfType.id : null,
-      date: todayStr(), note:'', recurringId:null, recurringPeriod:null
+      date: todayStr(), note:'', recurringId:null, recurringPeriod:null,
+      currencyId: data.baseCurrencyId, currencyPickerOpen:false
     }, prefill||{});
     render();
   }
   function openEditSheet(tx){
     state.sheet = {
       kind:'form', editingId:tx.id, type:tx.type, amountStr:String(tx.amount),
-      categoryId:tx.categoryId, date:tx.date, note:tx.note||'', recurringId:tx.recurringId||null, recurringPeriod:tx.recurringPeriod||null
+      categoryId:tx.categoryId, date:tx.date, note:tx.note||'', recurringId:tx.recurringId||null, recurringPeriod:tx.recurringPeriod||null,
+      currencyId: tx.currencyId || data.baseCurrencyId, currencyPickerOpen:false
     };
     render();
   }
@@ -1694,10 +1901,12 @@
     if (s.editingId){
       var tx = data.transactions.find(function(t){ return t.id === s.editingId; });
       tx.type = s.type; tx.amount = amount; tx.categoryId = s.categoryId; tx.date = s.date; tx.note = s.note;
+      tx.currencyId = s.currencyId;
       tx.updatedAt = new Date().toISOString();
     } else {
       data.transactions.push({
         id: uid(), type:s.type, amount:amount, categoryId:s.categoryId, date:s.date, note:s.note,
+        currencyId: s.currencyId,
         recurringId:s.recurringId||null, recurringPeriod:s.recurringPeriod||null,
         createdAt: new Date().toISOString(), updatedAt:null
       });
@@ -1751,6 +1960,15 @@
         break;
       case 'setSummaryType':
         state.summary.type = el.getAttribute('data-value');
+        render();
+        break;
+      case 'toggleSummaryCurrencyPicker':
+        state.summary.currencyPickerOpen = !state.summary.currencyPickerOpen;
+        render();
+        break;
+      case 'pickSummaryCurrency':
+        state.summary.currencyId = el.getAttribute('data-id');
+        state.summary.currencyPickerOpen = false;
         render();
         break;
 
@@ -1809,14 +2027,24 @@
 
       case 'keypad': {
         var k = el.getAttribute('data-key');
+        var entryCurK = curById(s.currencyId) || baseCurrency();
         var cur = s.amountStr === '0' ? '' : s.amountStr;
         if (k === '⌫'){ cur = cur.slice(0,-1); }
-        else if (k === '.'){ if (currency.decimals > 0 && cur.indexOf('.') === -1) cur += '.'; }
-        else { if (!(cur.indexOf('.') !== -1 && cur.split('.')[1].length >= currency.decimals)) cur += k; }
+        else if (k === '.'){ if (entryCurK.decimals > 0 && cur.indexOf('.') === -1) cur += '.'; }
+        else { if (!(cur.indexOf('.') !== -1 && cur.split('.')[1].length >= entryCurK.decimals)) cur += k; }
         s.amountStr = cur === '' ? '0' : cur;
         render();
         break;
       }
+      case 'toggleCurrencyPicker':
+        s.currencyPickerOpen = !s.currencyPickerOpen;
+        render();
+        break;
+      case 'pickSheetCurrency':
+        s.currencyId = el.getAttribute('data-id');
+        s.currencyPickerOpen = false;
+        render();
+        break;
 
       // 新增分類 and the record-entry date picker are launched FROM the still-open 記一筆 form,
       // so they live in state.subSheet -- a second overlay layered on top of state.sheet, which
@@ -1952,7 +2180,7 @@
       case 'confirmRecurring': {
         var defId = el.getAttribute('data-def'), due = el.getAttribute('data-due'), period = el.getAttribute('data-period');
         var def = data.recurring.find(function(d){ return d.id === defId; });
-        openAddSheet({ type:def.type, amountStr:String(def.amount), categoryId:def.categoryId, date:due, note:def.title, recurringId:def.id, recurringPeriod:period });
+        openAddSheet({ type:def.type, amountStr:String(def.amount), categoryId:def.categoryId, date:due, note:def.title, recurringId:def.id, recurringPeriod:period, currencyId: def.currencyId || data.baseCurrencyId });
         break;
       }
       case 'deferRecurring': dismissedThisSession.add(el.getAttribute('data-def')+'|'+el.getAttribute('data-period')); render(); break;
@@ -1965,27 +2193,74 @@
 
       case 'gotoSettings': state.settingsView = el.getAttribute('data-view') || null; render(); break;
 
-      case 'pickCurrencyPreset': {
-        var presetId = el.getAttribute('data-id');
-        var preset = CURRENCY_PRESETS.find(function(p){ return p.id === presetId; });
-        if (preset){ currency = Object.assign({}, preset); saveCurrency(); }
+      case 'currencyRowTap': {
+        var curTapped = curById(el.getAttribute('data-id'));
+        if (!curTapped) break;
+        state.currencyEditDraft = Object.assign({}, curTapped, { rate: String(curTapped.rate) });
+        state.settingsView = 'currencyForm';
         render();
         break;
       }
-      case 'pickCurrencyCustom':
-        if (currency.id !== 'custom'){
-          currency = { id:'custom', label:'自訂', symbol:currency.symbol, decimals:currency.decimals };
-          saveCurrency();
-        }
+      case 'newCurrency':
+        state.currencyEditDraft = { id:null, code:'', label:'', symbol:'', decimals:2, rate:'1', active:true };
+        state.settingsView = 'currencyForm';
         render();
         break;
+      case 'setBaseCurrency': {
+        var newBaseId = el.getAttribute('data-id');
+        if (newBaseId === data.baseCurrencyId) break;
+        rebaseCurrencies(newBaseId);
+        data.baseCurrencyId = newBaseId;
+        curById(newBaseId).active = true; // becoming 主幣別 forces it back on, even if it was disabled
+        persist();
+        render();
+        break;
+      }
+      case 'deleteCurrency': {
+        var delCurId = el.getAttribute('data-id');
+        if (delCurId === data.baseCurrencyId) break; // defensive -- UI never offers this on the base row
+        var delCur = curById(delCurId);
+        showConfirm('刪除幣別「'+(delCur?delCur.label:'')+'」？已經用這個幣別記錄的帳目跟固定收支會改用主幣別。', function(){
+          data.currencies = data.currencies.filter(function(c){ return c.id !== delCurId; });
+          data.transactions.forEach(function(t){ if (t.currencyId === delCurId) t.currencyId = data.baseCurrencyId; });
+          data.recurring.forEach(function(def){ if (def.currencyId === delCurId) def.currencyId = data.baseCurrencyId; });
+          persist();
+          if (state.settingsView === 'currencyForm'){ state.settingsView = 'currency'; state.currencyEditDraft = null; }
+          render();
+        });
+        break;
+      }
+      case 'saveCurrencyDraft': {
+        var cd = state.currencyEditDraft;
+        var code2 = (cd.code||'').trim(), label2 = (cd.label||'').trim(), symbol2 = (cd.symbol||'').trim();
+        if (!code2 || !label2 || !symbol2){ showAlert('代碼、名稱、符號都要填'); break; }
+        var isBaseEdit = cd.id && cd.id === data.baseCurrencyId;
+        var rate2 = 1;
+        if (!isBaseEdit){
+          rate2 = parseFloat(cd.rate);
+          if (!rate2 || rate2 <= 0){ showAlert('請輸入正確的匯率'); break; }
+        }
+        var active2 = isBaseEdit ? true : !!cd.active; // defensive -- 主幣別 stays forced on even if the (disabled) checkbox somehow got tampered with
+        if (cd.id){
+          var existingCur = curById(cd.id);
+          existingCur.code = code2; existingCur.label = label2; existingCur.symbol = symbol2;
+          existingCur.decimals = cd.decimals; existingCur.rate = rate2; existingCur.active = active2;
+        } else {
+          data.currencies.push({ id: uid(), code:code2, label:label2, symbol:symbol2, decimals:cd.decimals, rate:rate2, active:active2 });
+        }
+        persist();
+        state.settingsView = 'currency';
+        state.currencyEditDraft = null;
+        render();
+        break;
+      }
       case 'openFloatPanel':
         state.settingsView = el.getAttribute('data-view') || null;
         state.sheet = { kind:'settingsFloat' };
         render();
         break;
       case 'newRecurring':
-        state.recurringDraft = { id:null, title:'', type:'expense', amount:0, categoryId:data.categories[0]?data.categories[0].id:null, frequency:'monthly', dayOfMonth:1, dayOfWeek:1, active:true, startDate: todayStr() };
+        state.recurringDraft = { id:null, title:'', type:'expense', amount:0, categoryId:data.categories[0]?data.categories[0].id:null, currencyId:data.baseCurrencyId, frequency:'monthly', dayOfMonth:1, dayOfWeek:1, active:true, startDate: todayStr() };
         state.settingsView = 'recurringForm';
         render();
         break;
@@ -2041,7 +2316,7 @@
         break;
       }
       case 'exportBackup': {
-        var payload = { schemaVersion:1, exportedAt:new Date().toISOString(), transactions:data.transactions, recurring:data.recurring, skip:data.skip, categories:data.categories };
+        var payload = { schemaVersion:2, exportedAt:new Date().toISOString(), transactions:data.transactions, recurring:data.recurring, skip:data.skip, categories:data.categories, currencies:data.currencies, baseCurrencyId:data.baseCurrencyId };
         var blob = new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
@@ -2060,7 +2335,7 @@
           render();
         } else {
           showConfirm('確定要清除所有資料嗎？這個動作無法復原。', function(){
-            data.transactions = []; data.recurring = []; data.skip = []; data.categories = DEFAULT_CATEGORIES.slice();
+            resetAllData();
             persist(); state.view = todayStr(); render();
           });
         }
@@ -2074,12 +2349,12 @@
         syncMeta = {};
         state.linkTokenDraft = null;
         saveSyncMeta();
-        data.transactions = []; data.recurring = []; data.skip = []; data.categories = DEFAULT_CATEGORIES.slice();
+        resetAllData();
         state.subSheet = null;
         persist(); state.view = todayStr(); render();
         break;
       case 'clearDataAndSync':
-        data.transactions = []; data.recurring = []; data.skip = []; data.categories = DEFAULT_CATEGORIES.slice();
+        resetAllData();
         state.subSheet = null;
         persist(); state.view = todayStr(); render();
         break;
@@ -2306,14 +2581,17 @@
       state.subSheet[e.target.getAttribute('data-field')] = e.target.value;
     } else if (e.target.matches('[data-action="linkTokenInput"]')){
       state.linkTokenDraft = e.target.value;
-    } else if (e.target.matches('[data-action="currencySymbolInput"]')){
-      currency.symbol = e.target.value;
-      saveCurrency();
-    } else if (e.target.matches('[data-action="currencyDecimalsInput"]')){
-      currency.decimals = parseInt(e.target.value, 10) || 0;
-      saveCurrency();
-      render(); // a <select> pick is a discrete action (not per-keystroke like the symbol field
-                // above), so re-rendering here has no focus-loss downside worth avoiding.
+    } else if (e.target.matches('[data-action="currencyDraftInput"]')){
+      var cField = e.target.getAttribute('data-field');
+      if (cField === 'decimals'){
+        state.currencyEditDraft.decimals = parseInt(e.target.value, 10) || 0;
+        render(); // a <select> pick is a discrete action (not per-keystroke like the text fields
+                  // below), so re-rendering here has no focus-loss downside worth avoiding.
+      } else if (cField === 'active'){
+        state.currencyEditDraft.active = e.target.checked;
+      } else {
+        state.currencyEditDraft[cField] = e.target.value;
+      }
     } else if (e.target.matches('[data-action="searchInput"]')){
       // debounced -- re-rendering on every single keystroke rebuilds the whole sheet (this app's
       // render() always fully rebuilds), which was visibly flashing while typing (使用者原話「每
@@ -2362,7 +2640,10 @@
           data.recurring = obj.recurring || [];
           data.skip = obj.skip || [];
           data.categories = obj.categories && obj.categories.length ? obj.categories : DEFAULT_CATEGORIES.slice();
+          data.currencies = obj.currencies && obj.currencies.length ? obj.currencies : DEFAULT_CURRENCIES.map(function(c){ return Object.assign({}, c); });
+          data.baseCurrencyId = (obj.baseCurrencyId && curById(obj.baseCurrencyId)) ? obj.baseCurrencyId : data.currencies[0].id;
           ensureRecurringStartDates();
+          ensureCurrencyIds();
           persist();
           state.view = todayStr();
           render();
