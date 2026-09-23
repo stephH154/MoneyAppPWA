@@ -96,7 +96,14 @@
 
   /* ---------- body ---------- */
   .app-body-wrap{flex:1;min-height:0;position:relative;}
-  .app-body{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:12px 16px 24px;}
+  /* touch-action:pan-y is required for the daySwipe gesture below to actually receive horizontal
+     pointermove deltas on a real touchscreen -- without it the browser's default touch handling
+     claims the gesture for its own (vertical) scrolling before JS sees enough of the drag to tell
+     it was meant to be a horizontal swipe. Same reasoning .row-content/.onboarding-body already
+     apply for their own swipe gestures; missed here originally, which is why daySwipe worked fine
+     against synthetic PointerEvents in headless testing (those bypass touch-action entirely) but
+     did nothing on an actual phone. */
+  .app-body{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:12px 16px 24px;touch-action:pan-y;}
   /* 帳本左右滑切換日期的進場動畫 -- 跟導覽投影片同一套「單一元素滑入」手法（見 renderLedgerList()
      的 dayNavDir 一次性旗標，consumed-and-reset 避免每次 render() 重播，同一招 s.animated 已經在
      搜尋彈窗上驗證過）。距離/時間比導覽稍微收斂一點，畢竟這個是切一天就會播一次的高頻互動，
@@ -484,7 +491,7 @@
 
   // 每次真的要上版部署時把這個號碼加一（跟 sw.js 裡同名常數各自維護，建議一起 bump）。
   // 純粹拿來顯示在「設定」頁面最下面，方便確認目前跑的是不是最新版本。
-  var APP_VERSION = 'v1.10.0';
+  var APP_VERSION = 'v1.10.1';
 
   // 貼上你自己部署的 Apps Script /exec 網址（見 ledger-cloud-sync-apps-script.txt）。
   // 留空的話「雲端同步」設定頁會顯示「還沒設定」，其餘功能不受影響。
