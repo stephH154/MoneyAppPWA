@@ -97,6 +97,17 @@
   /* ---------- body ---------- */
   .app-body-wrap{flex:1;min-height:0;position:relative;}
   .app-body{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;padding:12px 16px 24px;}
+  /* 帳本左右滑切換日期的進場動畫 -- 跟導覽投影片同一套「單一元素滑入」手法（見 renderLedgerList()
+     的 dayNavDir 一次性旗標，consumed-and-reset 避免每次 render() 重播，同一招 s.animated 已經在
+     搜尋彈窗上驗證過）。距離/時間比導覽稍微收斂一點，畢竟這個是切一天就會播一次的高頻互動，
+     不是像導覽那種一次性場景。 */
+  @keyframes daySlideNext{ from{ transform:translateX(18px); opacity:0; } to{ transform:translateX(0); opacity:1; } }
+  @keyframes daySlidePrev{ from{ transform:translateX(-18px); opacity:0; } to{ transform:translateX(0); opacity:1; } }
+  .day-anim-next{ animation:daySlideNext .2s ease-out; }
+  .day-anim-prev{ animation:daySlidePrev .2s ease-out; }
+  @media (prefers-reduced-motion:reduce){
+    .day-anim-next, .day-anim-prev{ animation:none; }
+  }
   /* fixed region between .app-body and the tabbar -- see renderLedgerFooter() -- so 今日收支/
      本月結餘 stay flush against the tab switcher instead of scrolling away with the list above.
      Extra bottom margin so the tabbar reads as clearly separate, not glued to the content above it. */
@@ -419,6 +430,19 @@
   .cat-row .cat-name{font-size:12px;display:flex;justify-content:space-between;}
   .cat-row .cat-name .pct{color:var(--ink-soft);}
 
+  /* ---------- 總結分類明細（浮動窗）---------- */
+  .drill-hero{display:flex;align-items:center;gap:10px;background:var(--paper);border:1px solid var(--rule);border-radius:12px;padding:10px 12px;}
+  .drill-hero-ic{font-size:22px;flex:none;}
+  .drill-hero-mid{flex:1;min-width:0;}
+  .drill-hero-name{font-family:'Fraunces',serif;font-weight:700;font-size:14px;}
+  .drill-hero-period{font-size:10.5px;color:var(--ink-soft);}
+  .drill-hero-total{text-align:right;flex:none;}
+  .drill-hero-amt{font-weight:700;font-size:14px;}
+  .drill-hero-amt.income{color:var(--income);}
+  .drill-hero-amt.expense{color:var(--expense);}
+  .drill-hero-cnt{font-size:9.5px;color:var(--ink-soft);}
+  .drill-txlist{max-height:280px;overflow-y:auto;}
+
   /* ---------- desktop card breakpoint (same file/state, so mobile+desktop test side by side) ----------
      kept last: these override earlier rules for .app/.app-shell/.backdrop/.sheet, and an @media
      block only wins a same-specificity tie by SOURCE ORDER, not by having a condition -- it must
@@ -460,7 +484,7 @@
 
   // 每次真的要上版部署時把這個號碼加一（跟 sw.js 裡同名常數各自維護，建議一起 bump）。
   // 純粹拿來顯示在「設定」頁面最下面，方便確認目前跑的是不是最新版本。
-  var APP_VERSION = 'v1.9.0';
+  var APP_VERSION = 'v1.10.0';
 
   // 貼上你自己部署的 Apps Script /exec 網址（見 ledger-cloud-sync-apps-script.txt）。
   // 留空的話「雲端同步」設定頁會顯示「還沒設定」，其餘功能不受影響。
@@ -957,6 +981,13 @@
   var swipe = { pointerId:null, el:null, startX:0, startY:0, dragging:false, txId:null };
   var pendingRemovals = {}; // txId -> timeoutId
 
+  // which direction the day content should slide in from on the NEXT renderLedgerList() call --
+  // same one-shot-signal pattern as onboardingDir (a plain closure var, not part of state, since
+  // it's consumed and reset to null the moment it's read -- see the daySwipe pointer handlers
+  // below and the 'prevDay'/'nextDay' actions for where it gets set).
+  var dayNavDir = null;
+  var daySwipe = { pointerId:null, startX:0, startY:0, dragging:false };
+
   /* ================= computed ================= */
   function txForDate(dateStr){
     return data.transactions.filter(function(t){ return t.date === dateStr; })
@@ -1197,7 +1228,7 @@
 
     h += '<div class="row-list">';
     bd.rows.forEach(function(r){
-      h += '<div class="cat-row">';
+      h += '<div class="cat-row" data-action="openCategoryDrill" data-category-id="'+(r.categoryId||'')+'" style="cursor:pointer;">';
       h += '<span class="dot" style="background:'+catColor(r.categoryId)+';"></span>';
       h += '<div class="cat-ic">'+catIcon(r.categoryId)+'</div>';
       h += '<div class="cat-mid"><div class="cat-name"><span>'+escapeHtml(catName(r.categoryId))+'</span><span class="pct">'+r.pct.toFixed(1)+'%</span></div></div>';
@@ -1212,6 +1243,13 @@
   // list ONLY. Kept separate from renderLedgerFooter() so the day/month totals can sit in a fixed
   // region below .app-body instead of scrolling away with a growing transaction list.
   function renderLedgerList(){
+    // one-shot: only plays right after prevDay/nextDay/a swipe actually changed state.view (see
+    // where dayNavDir gets set) -- consumed and reset here so any OTHER re-render this session
+    // (opening a sheet, ticking a checkbox, anything unrelated) doesn't replay it. Same gating
+    // technique as the search sheet's entrance animation (s.animated) -- this app's full-innerHTML
+    // rebuild means a plain CSS `animation` class would otherwise replay on every single render().
+    var animClass = dayNavDir === 'next' ? ' day-anim-next' : (dayNavDir === 'prev' ? ' day-anim-prev' : '');
+    dayNavDir = null;
     var isToday = state.view === todayStr();
     var h = '';
     if (isToday){
@@ -1256,7 +1294,7 @@
       });
       h += '</div>';
     }
-    return h;
+    return '<div class="ledger-day-content'+animClass+'">' + h + '</div>';
   }
 
   // fixed region between .app-body and the tabbar: today/this-day totals + 本月結餘, flush against
@@ -1603,10 +1641,16 @@
     if (s.kind === 'calendar') return renderCalendarSheet(s);
     if (s.kind === 'settingsFloat') return renderSettingsFloatSheet(s);
     if (s.kind === 'search') return renderSearchSheet(s);
+    if (s.kind === 'categoryDrill') return renderCategoryDrillSheet(s);
     return renderFormSheet(s);
   }
 
   // popup layered on top of state.sheet (see the state.subSheet comment near its declaration).
+  // 'preview' here is the SAME renderPreviewSheet() used as a top-level state.sheet elsewhere
+  // (ledger row tap, search result tap) -- it doesn't care which layer it's in. Only reachable as
+  // a subSheet from 總結's 分類明細 (state.sheet.kind==='categoryDrill'), so tapping a transaction
+  // there can peek at its detail without losing the filtered list underneath -- same "layer a small
+  // popup over a parent sheet that stays mounted" idea as the calendar/新增分類 popups.
   function renderSubSheet(){
     var s = state.subSheet;
     if (s.kind === 'calendar') return renderCalendarSheet(s);
@@ -1617,6 +1661,7 @@
     if (s.kind === 'syncConflict') return renderSyncConflictSheet();
     if (s.kind === 'linkOverwriteChoice') return renderLinkOverwriteChoiceSheet(s);
     if (s.kind === 'clearDataChoice') return renderClearDataChoiceSheet();
+    if (s.kind === 'preview') return renderPreviewSheet(s);
     return '';
   }
 
@@ -1849,14 +1894,70 @@
     return h;
   }
 
+  // 總結頁點一個分類列開出來的：這個分類在目前選定期間/類型/幣別下的所有交易，浮動窗
+  // （.center-modal，跟日曆/新增分類/帳目明細同一套「小型專注彈窗」語言）而不是全高 sheet
+  // ——使用者原話「分類明細也可以像浮動窗一樣就好」。現算，不快取（跟這個 app 每個總覽數字
+  // 一樣的原則）：s 只記 categoryId/type/unit/anchor/currencyId 這些「怎麼篩」的參數，每次
+  // render() 都重新從 data.transactions 篩一次，不是篩好存一份快照。清單長度不像日曆格子/
+  // 圖示網格那樣固定，所以整張浮動窗給一個 max-height，清單本身(.drill-txlist)也有自己的
+  // max-height+overflow-y:auto，長度真的超過才在清單內部捲動，不會把浮動窗撐到頂滿螢幕。
+  function renderCategoryDrillSheet(s){
+    var targetCur = curById(s.currencyId) || baseCurrency();
+    var start = periodStart(s.unit, s.anchor), end = periodEnd(s.unit, s.anchor);
+    var list = data.transactions.filter(function(t){
+      return t.type === s.type && t.date >= start && t.date <= end && (t.categoryId||null) === s.categoryId;
+    }).sort(function(a,b){ return a.date < b.date ? 1 : (a.date > b.date ? -1 : 0); });
+    var total = 0;
+    list.forEach(function(t){ total += convertAmt(t.amount, t.currencyId||data.baseCurrencyId, targetCur.id); });
+
+    var h = '<div class="backdrop center-modal" data-action="closeSheetBackdrop">';
+    h += '<div class="sheet center-modal" data-stop="1" style="max-height:75vh;"><div class="handle"></div>';
+    h += '<div class="sheet-head"><h3>分類明細</h3><button class="x" data-action="closeSheet">✕</button></div>';
+    h += '<div class="drill-hero">';
+    h += '<div class="drill-hero-ic">'+catIcon(s.categoryId)+'</div>';
+    h += '<div class="drill-hero-mid"><div class="drill-hero-name">'+escapeHtml(catName(s.categoryId))+'</div><div class="drill-hero-period">'+periodLabel(s.unit, start, end)+'・'+(s.type==='expense'?'支出':'收入')+'</div></div>';
+    h += '<div class="drill-hero-total"><div class="drill-hero-amt '+s.type+'">'+(s.type==='expense'?'-':'+')+fmtAmt(total, targetCur)+'</div><div class="drill-hero-cnt">共 '+list.length+' 筆</div></div>';
+    h += '</div>';
+    if (!list.length){
+      h += '<div class="empty-note">這段期間這個分類沒有紀錄</div>';
+    } else {
+      h += '<div class="row-list drill-txlist">';
+      list.forEach(function(t){
+        h += '<div class="row-content" data-action="categoryDrillResultTap" data-id="'+t.id+'" style="cursor:pointer;">';
+        h += '<div class="cat">'+catIcon(t.categoryId)+'</div>';
+        h += '<div class="title">'+shortLabel(t.date)+'　'+escapeHtml(t.note || catName(t.categoryId))+'</div>';
+        h += '<div class="amt '+t.type+'">'+(t.type==='expense'?'-':'+')+fmtAmt(convertAmt(t.amount, t.currencyId||data.baseCurrencyId, targetCur.id))+'</div>';
+        h += '</div>';
+      });
+      h += '</div>';
+    }
+    h += '</div></div>';
+    return h;
+  }
+
+  // reused as either a top-level state.sheet (ledger row tap, search result tap) OR a subSheet
+  // layered over 分類明細's state.sheet=categoryDrill (tapping a transaction there peeks at its
+  // detail without losing the filtered list underneath). The markup itself doesn't care which
+  // layer it's in, but its close/delete/edit actions need to know which one to clear -- same
+  // dual-layer resolution activeCalendar() already does for the calendar popup.
+  function activePreview(){
+    if (state.subSheet && state.subSheet.kind === 'preview') return state.subSheet;
+    if (state.sheet && state.sheet.kind === 'preview') return state.sheet;
+    return null;
+  }
+  function closeActivePreview(){
+    if (state.subSheet && state.subSheet.kind === 'preview'){ state.subSheet = null; }
+    else { state.sheet = null; }
+  }
+
   function renderPreviewSheet(s){
     var t = data.transactions.find(function(x){ return x.id === s.txId; });
-    if (!t){ state.sheet = null; return ''; }
+    if (!t){ closeActivePreview(); return ''; }
     var txCur = curById(t.currencyId) || baseCurrency();
     var baseCur = baseCurrency();
-    var h = '<div class="backdrop center-modal" data-action="closeSheetBackdrop">';
+    var h = '<div class="backdrop center-modal" data-action="closePreviewBackdrop">';
     h += '<div class="sheet center-modal" data-stop="1"><div class="handle"></div>';
-    h += '<div class="sheet-head"><h3>帳目明細</h3><button class="x" data-action="closeSheet">✕</button></div>';
+    h += '<div class="sheet-head"><h3>帳目明細</h3><button class="x" data-action="closePreview">✕</button></div>';
     h += '<div class="preview-hero"><div class="cat">'+catIcon(t.categoryId)+'</div>';
     h += '<div class="name">'+escapeHtml(t.note || catName(t.categoryId))+'</div>';
     h += '<div class="amt '+t.type+'">'+(t.type==='expense'?'-':'+')+escapeHtml(baseCur.symbol)+' '+fmtAmt(convertAmt(t.amount, txCur.id, baseCur.id))+'</div></div>';
@@ -1928,8 +2029,8 @@
     var s = state.sheet;
 
     switch(action){
-      case 'prevDay': state.view = addDays(state.view, -1); render(); break;
-      case 'nextDay': if (state.view < todayStr()) { state.view = addDays(state.view, 1); render(); } break;
+      case 'prevDay': dayNavDir = 'prev'; state.view = addDays(state.view, -1); render(); break;
+      case 'nextDay': if (state.view < todayStr()) { dayNavDir = 'next'; state.view = addDays(state.view, 1); render(); } break;
       case 'goToday': state.view = todayStr(); render(); break;
       case 'tab': state.tab = el.getAttribute('data-tab'); state.settingsView=null; state.sheet=null; state.subSheet=null; render(); break;
 
@@ -1983,17 +2084,38 @@
         render();
         break;
       }
+      case 'openCategoryDrill': {
+        var sm = state.summary;
+        state.sheet = { kind:'categoryDrill', categoryId: el.getAttribute('data-category-id') || null,
+          type: sm.type, unit: sm.unit, anchor: sm.anchor, currencyId: sm.currencyId };
+        render();
+        break;
+      }
+      case 'categoryDrillResultTap':
+        // layered subSheet, NOT state.sheet -- keeps the 分類明細 list mounted underneath so
+        // closing this peek returns to the same filtered list instead of back to 總結.
+        state.subSheet = { kind:'preview', txId: el.getAttribute('data-id') };
+        render();
+        break;
       case 'closeSheet': state.sheet = null; render(); break;
       case 'closeSheetBackdrop': if (e.target === el) { state.sheet = null; render(); } break;
 
+      // dedicated close actions for the preview sheet -- it can be either a top-level state.sheet
+      // OR a subSheet layered over 分類明細 (see activePreview()'s comment), so it can't reuse the
+      // generic closeSheet/closeSheetBackdrop above (those always assume state.sheet).
+      case 'closePreview': closeActivePreview(); render(); break;
+      case 'closePreviewBackdrop': if (e.target === el) { closeActivePreview(); render(); } break;
+
       case 'deleteFromPreview':
-        state.sheet = null;
+        closeActivePreview();
         beginRemove(el.getAttribute('data-id'));
         render();
         break;
       case 'editFromPreview': {
         var tx = data.transactions.find(function(t){ return t.id === el.getAttribute('data-id'); });
-        if (tx) openEditSheet(tx);
+        // editing fully exits the browse-a-category flow -- clear any layered preview subSheet too,
+        // not just state.sheet, so nothing stale is left mounted underneath the edit form.
+        if (tx){ state.subSheet = null; openEditSheet(tx); }
         break;
       }
       case 'deleteFromSheet': {
@@ -2712,6 +2834,48 @@
   document.addEventListener('pointercancel', function(){
     if (swipe.el){ swipe.el.style.transform=''; swipe.el.style.opacity=''; }
     swipe.pointerId = null; swipe.el = null; swipe.dragging = false;
+  });
+
+  /* ================= 帳本主頁：左右滑動切換上一天/下一天 ================= */
+  // 左滑＝下一天、右滑＝上一天，跟導覽投影片同一套方向慣例。刻意排除從 .row-content（帳目本身）
+  // 開始的拖曳 -- 那個手勢已經另有意義（上面那組 swipe tracker 的滑除刪除），同一塊區域不能讓
+  // 兩種手勢搶同一個 pointer；也排除從任何 <button> 開始的拖曳（待確認區的確認/延後/跳過、復原
+  // 按鈕等）-- 不然手指從按鈕上滑開＋滑超過 50px 門檻會被誤判成翻頁，而不是單純沒點到按鈕。
+  // 在帳目列/按鈕之外的空白處/清單背景開始拖才算翻頁。
+  document.addEventListener('pointerdown', function(e){
+    if (!isLedgerActive()) return;
+    if (!e.target.closest('.app-body')) return;
+    if (e.target.closest('.row-content')) return;
+    if (e.target.closest('button')) return;
+    if (daySwipe.pointerId !== null) return;
+    daySwipe.pointerId = e.pointerId;
+    daySwipe.startX = e.clientX; daySwipe.startY = e.clientY;
+    daySwipe.dragging = false;
+  });
+  document.addEventListener('pointermove', function(e){
+    if (daySwipe.pointerId !== e.pointerId) return;
+    var dx = e.clientX - daySwipe.startX, dy = e.clientY - daySwipe.startY;
+    if (!daySwipe.dragging){
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      if (Math.abs(dy) > Math.abs(dx)) { daySwipe.pointerId = null; return; } // vertical scroll intent, bail
+      daySwipe.dragging = true;
+    }
+  });
+  document.addEventListener('pointerup', function(e){
+    if (daySwipe.pointerId !== e.pointerId) return;
+    var dx = e.clientX - daySwipe.startX;
+    var wasDragging = daySwipe.dragging;
+    daySwipe.pointerId = null; daySwipe.dragging = false;
+    if (!wasDragging) return;
+    if (dx <= -50){
+      if (state.view < todayStr()){ dayNavDir = 'next'; state.view = addDays(state.view, 1); render(); }
+    } else if (dx >= 50){
+      dayNavDir = 'prev'; state.view = addDays(state.view, -1); render();
+    }
+  });
+  document.addEventListener('pointercancel', function(e){
+    if (daySwipe.pointerId !== e.pointerId) return;
+    daySwipe.pointerId = null; daySwipe.dragging = false;
   });
 
   /* ================= 首次啟動導覽: tap 翻頁 / 左右滑 ================= */
