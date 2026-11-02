@@ -450,6 +450,25 @@
   .drill-hero-cnt{font-size:9.5px;color:var(--ink-soft);}
   .drill-txlist{max-height:280px;overflow-y:auto;}
 
+  /* ---------- 總結關鍵字查詢 ---------- */
+  .kw-box{position:relative;margin-bottom:12px;}
+  .kw-box .note-input{padding-left:32px;padding-right:34px;border:1.5px solid var(--accent);background:var(--card);border-radius:12px;}
+  .kw-box .kw-mag{position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:13px;pointer-events:none;}
+  .kw-box .kw-clear{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:26px;height:26px;border:none;background:none;color:var(--ink-soft);font-size:14px;border-radius:50%;}
+  .kw-result{background:var(--card);border:1px solid var(--rule);border-radius:12px;padding:12px;margin-bottom:10px;}
+  .kw-result-top{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;}
+  .kw-result-what{font-size:10.5px;color:var(--ink-soft);line-height:1.5;min-width:0;overflow-wrap:anywhere;}
+  .kw-result-what b{color:var(--ink);font-weight:600;}
+  .kw-result-sum{font-family:'Fraunces',serif;font-weight:700;font-size:22px;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .kw-result-sum.income{color:var(--income);}
+  .kw-result-sum.expense{color:var(--expense);}
+  .kw-bar{height:6px;background:var(--rule);border-radius:3px;margin:10px 0 5px;overflow:hidden;}
+  .kw-bar span{display:block;height:100%;background:var(--accent);}
+  .kw-barnote{font-size:10px;color:var(--ink-soft);display:flex;justify-content:space-between;gap:8px;}
+  .row-content .title.two-line{white-space:normal;overflow:visible;}
+  .row-content .title .kw-cat{display:block;font-size:10px;color:var(--ink-soft);}
+  mark.kw-hit{background:var(--pending-bg);color:inherit;border-radius:3px;padding:0 1px;box-shadow:0 0 0 1px var(--rule-strong) inset;}
+
   /* ---------- desktop card breakpoint (same file/state, so mobile+desktop test side by side) ----------
      kept last: these override earlier rules for .app/.app-shell/.backdrop/.sheet, and an @media
      block only wins a same-specificity tie by SOURCE ORDER, not by having a condition -- it must
@@ -491,7 +510,7 @@
 
   // 每次真的要上版部署時把這個號碼加一（跟 sw.js 裡同名常數各自維護，建議一起 bump）。
   // 純粹拿來顯示在「設定」頁面最下面，方便確認目前跑的是不是最新版本。
-  var APP_VERSION = 'v1.10.1';
+  var APP_VERSION = 'v1.11.0';
 
   // 貼上你自己部署的 Apps Script /exec 網址（見 ledger-cloud-sync-apps-script.txt）。
   // 留空的話「雲端同步」設定頁會顯示「還沒設定」，其餘功能不受影響。
@@ -972,7 +991,7 @@
                        // disables every button in that dialog so a double-tap can't fire two
                        // resolutions (本機/雲端/合併) before either one's push/pull actually lands
     linkTokenDraft: null, // editable draft for the not-yet-linked token input; null = empty, no default
-    summary: { unit:'month', anchor: todayStr(), type:'expense', currencyId: data.baseCurrencyId, currencyPickerOpen:false },
+    summary: { unit:'month', anchor: todayStr(), type:'expense', currencyId: data.baseCurrencyId, currencyPickerOpen:false, query:'' },
     // null = not showing; a number = which slide is up. Only starts at 0 on a genuinely fresh
     // install (the ONBOARDED_KEY flag, not "no transactions yet" -- 清除所有資料 shouldn't force
     // it to replay).
@@ -1162,6 +1181,50 @@
     return renderSettings();
   }
 
+  // 把 text 裡跟 kw 相同的片段（不分大小寫）包上 <mark>，其餘照常 escape。
+  function highlightKw(text, kw){
+    var s = String(text||''), lo = s.toLowerCase(), k = kw.toLowerCase(), out = '', i = 0, j;
+    if (!k) return escapeHtml(s);
+    while ((j = lo.indexOf(k, i)) !== -1){
+      out += escapeHtml(s.slice(i, j)) + '<mark class="kw-hit">' + escapeHtml(s.slice(j, j + k.length)) + '</mark>';
+      i = j + k.length;
+    }
+    return out + escapeHtml(s.slice(i));
+  }
+
+  // 結果卡：期間內「目前選的類型」且備註或分類名稱含關鍵字的帳目，金額換算成總結選的幣別後加總，
+  // 現算不快取（跟總結其他數字同一原則）。typeTotal 是同期間同類型的全部金額，拿來算占比。
+  function renderSummaryKeywordResult(sm, summaryCur, start, end, label, typeTotal){
+    var kw = sm.query.trim(), k = kw.toLowerCase();
+    var typeLbl = sm.type === 'expense' ? '支出' : '收入';
+    var hits = data.transactions.filter(function(t){
+      if (t.type !== sm.type || t.date < start || t.date > end) return false;
+      return (t.note||'').toLowerCase().indexOf(k) > -1 || catName(t.categoryId).toLowerCase().indexOf(k) > -1;
+    }).sort(function(a,b){ return a.date < b.date ? 1 : (a.date > b.date ? -1 : 0); });
+    if (!hits.length){
+      return '<div class="kw-result"><div class="empty-note">'+escapeHtml(label)+'沒有符合「'+escapeHtml(kw)+'」的'+typeLbl+'帳目</div></div>';
+    }
+    var sum = 0;
+    hits.forEach(function(t){ sum += convertAmt(t.amount, t.currencyId||data.baseCurrencyId, summaryCur.id); });
+    var pct = typeTotal > 0 ? sum / typeTotal * 100 : 0;
+    var h = '<div class="kw-result"><div class="kw-result-top">';
+    h += '<div class="kw-result-what">'+escapeHtml(label)+'・'+typeLbl+'<br>含「<b>'+escapeHtml(kw)+'</b>」共 <b>'+hits.length+'</b> 筆</div>';
+    h += '<div class="kw-result-sum '+sm.type+'">'+fmtAmt(sum, summaryCur)+'</div></div>';
+    h += '<div class="kw-bar"><span style="width:'+Math.max(Math.min(pct,100), 1.5).toFixed(1)+'%"></span></div>';
+    h += '<div class="kw-barnote"><span>占'+typeLbl+' '+pct.toFixed(1)+'%</span><span>'+typeLbl+'共 '+fmtAmt(typeTotal, summaryCur)+'</span></div></div>';
+    h += '<div class="row-list">';
+    hits.forEach(function(t){
+      var amt = convertAmt(t.amount, t.currencyId||data.baseCurrencyId, summaryCur.id);
+      h += '<div class="row-content" data-action="openPreview" data-id="'+t.id+'" style="cursor:pointer;">';
+      h += '<div class="cat">'+catIcon(t.categoryId)+'</div>';
+      h += '<div class="title two-line">'+shortLabel(t.date)+'　'+highlightKw(t.note || catName(t.categoryId), kw)+'<span class="kw-cat">'+highlightKw(catName(t.categoryId), kw)+'</span></div>';
+      h += '<div class="amt '+t.type+'">'+(t.type==='expense'?'-':'+')+fmtAmt(amt, summaryCur)+'</div>';
+      h += '</div>';
+    });
+    h += '</div>';
+    return h;
+  }
+
   function renderSummaryTab(){
     var sm = state.summary;
     var summaryCur = curById(sm.currencyId) || baseCurrency();
@@ -1208,6 +1271,18 @@
     h += '<button class="'+(sm.type==='expense'?'on expense':'')+'" data-action="setSummaryType" data-value="expense">－ 支出</button>';
     h += '<button class="'+(sm.type==='income'?'on income':'')+'" data-action="setSummaryType" data-value="income">＋ 收入</button>';
     h += '</div>';
+
+    // 關鍵字查詢：收支分開算（跟上面的支出/收入切換走，使用者確認「收支分開算」）。有輸入關鍵字時
+    // 結果卡取代圓餅圖＋分類列表，清掉就換回來。比對範圍＝備註＋分類名稱、不分大小寫，跟 🔍 搜尋一致。
+    h += '<div class="kw-box"><span class="kw-mag" aria-hidden="true">🔍</span>';
+    h += '<input type="text" class="note-input" data-action="summaryKwInput" enterkeyhint="search" autocomplete="off" aria-label="關鍵字" placeholder="查這段期間的關鍵字" value="'+escapeHtml(sm.query||'')+'">';
+    if (sm.query) h += '<button type="button" class="kw-clear" data-action="clearSummaryKw" aria-label="清除關鍵字">✕</button>';
+    h += '</div>';
+    if ((sm.query||'').trim()){
+      h += renderSummaryKeywordResult(sm, summaryCur, start, end, label, bd.total);
+      h += '</div>';
+      return h;
+    }
 
     if (!bd.rows.length){
       h += '<div class="empty-note">這段期間還沒有'+(sm.type==='expense'?'支出':'收入')+'紀錄</div>';
@@ -2070,6 +2145,13 @@
         state.summary.type = el.getAttribute('data-value');
         render();
         break;
+      case 'clearSummaryKw': {
+        state.summary.query = '';
+        render();
+        var kwBox = document.querySelector('[data-action="summaryKwInput"]');
+        if (kwBox) kwBox.focus();
+        break;
+      }
       case 'toggleSummaryCurrencyPicker':
         state.summary.currencyPickerOpen = !state.summary.currencyPickerOpen;
         render();
@@ -2692,6 +2774,7 @@
   }, false);
 
   var searchDebounceTimer = null;
+  var summaryKwTimer = null;
   document.addEventListener('input', function(e){
     if (e.target.matches('[data-action="setSheetNote"]')){
       state.sheet.note = e.target.value;
@@ -2750,6 +2833,21 @@
         if (newSearchInput){
           newSearchInput.focus();
           newSearchInput.setSelectionRange(searchSelStart, searchSelEnd);
+        }
+      }, 200);
+    } else if (e.target.matches('[data-action="summaryKwInput"]')){
+      // 同 searchInput：debounce 200ms + IME 組字中不重繪（render() 會重建整個 input，組字到一半被
+      // 銷毀會把注音直接倒進欄位），重繪後把焦點/游標還原。
+      state.summary.query = e.target.value;
+      clearTimeout(summaryKwTimer);
+      if (e.isComposing) return;
+      var kwSelStart = e.target.selectionStart, kwSelEnd = e.target.selectionEnd;
+      summaryKwTimer = setTimeout(function(){
+        render();
+        var newKwInput = document.querySelector('[data-action="summaryKwInput"]');
+        if (newKwInput){
+          newKwInput.focus();
+          newKwInput.setSelectionRange(kwSelStart, kwSelEnd);
         }
       }, 200);
     }
