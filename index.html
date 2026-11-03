@@ -469,6 +469,19 @@
   .row-content .title .kw-cat{display:block;font-size:10px;color:var(--ink-soft);}
   mark.kw-hit{background:var(--pending-bg);color:inherit;border-radius:3px;padding:0 1px;box-shadow:0 0 0 1px var(--rule-strong) inset;}
 
+  /* ---------- 手機：鎖死整頁捲動（v1.11.1）----------
+     真機 PWA 上整個 .app 會被上下拖動、帳本/總結/設定 Tab 列被帶到畫面下面（桌機模擬器不會）。
+     根因方向：.app 的高度原本只靠 100dvh，真機回報的 dvh 可能比實際看得到的區域多一截，文件
+     因此比視窗高、整頁變成可捲動。這個 app 所有捲動都發生在內部（.app-body / 各 sheet），
+     整頁本來就不該動——所以手機寬度下把 body 釘成視窗大小（fixed + inset:0）、關掉整頁捲動與
+     橡皮筋回彈，.app 改吃 body 的 100% 而不是 dvh。只限 <720px：桌面版面是帶 padding 的置中
+     卡片，頁面短的時候仍需要能捲到卡片底部。 */
+  @media (max-width:719.98px){
+    html,body{ overflow:hidden; overscroll-behavior:none; }
+    body{ position:fixed; inset:0; width:100%; }
+    .app{ height:100%; }
+  }
+
   /* ---------- desktop card breakpoint (same file/state, so mobile+desktop test side by side) ----------
      kept last: these override earlier rules for .app/.app-shell/.backdrop/.sheet, and an @media
      block only wins a same-specificity tie by SOURCE ORDER, not by having a condition -- it must
@@ -510,7 +523,7 @@
 
   // 每次真的要上版部署時把這個號碼加一（跟 sw.js 裡同名常數各自維護，建議一起 bump）。
   // 純粹拿來顯示在「設定」頁面最下面，方便確認目前跑的是不是最新版本。
-  var APP_VERSION = 'v1.11.0';
+  var APP_VERSION = 'v1.11.1';
 
   // 貼上你自己部署的 Apps Script /exec 網址（見 ledger-cloud-sync-apps-script.txt）。
   // 留空的話「雲端同步」設定頁會顯示「還沒設定」，其餘功能不受影響。
